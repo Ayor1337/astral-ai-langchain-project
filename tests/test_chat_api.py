@@ -1,0 +1,304 @@
+import pytest
+from fastapi.testclient import TestClient
+
+import app.api.chat as chat_api
+from app.core.config import ConfigurationError
+from app.llm.base import UpstreamServiceError
+from app.main import app
+from app.services.exceptions import ConversationNotFoundError
+
+
+@pytest.fixture
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def test_stream_chat_returns_chunk_only_when_thinking_disabled_hits_simple_route(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        assert request.conversation_id is None
+        assert request.message == "你好"
+        assert request.thinking_enabled is False
+        yield ("conversation", {"conversation_id": "conv-1", "title": "新对话", "run_id": "run-1"})
+        yield ("chunk", {"content": "你好"})
+        yield ("chunk", {"content": "！"})
+        yield ("done", {"status": "completed", "run_id": "run-1"})
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={"conversation_id": None, "message": "你好"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: conversation" in body
+    assert '"conversation_id":"conv-1"' in body
+    assert '"run_id":"run-1"' in body
+    assert "event: chunk" in body
+    assert '"content":"你好"' in body
+    assert '"content":"！"' in body
+    assert "event: route" not in body
+    assert "event: planner_done" not in body
+    assert "event: reasoning_chunk" not in body
+    assert "event: reasoning_done" not in body
+    assert "event: done" in body
+
+
+def test_stream_chat_returns_route_then_trace_when_thinking_disabled_hits_complex_route(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        assert request.thinking_enabled is False
+        yield ("conversation", {"conversation_id": "conv-1", "title": "新对话", "run_id": "run-1"})
+        yield (
+            "route",
+            {
+                "route": "agent",
+                "plan": ["搜索相关信息", "抓取候选链接"],
+                "tools": ["web_search", "http_fetch"],
+            },
+        )
+        yield ("planner_done", {"status": "completed"})
+        yield (
+            "trace_step",
+            {
+                "step_id": "search-1",
+                "type": "search",
+                "kind": "result_list",
+                "status": "success",
+                "message": "已搜索到候选结果",
+                "timestamp": "2026-03-18T12:00:00+00:00",
+                "order": 1,
+            },
+        )
+        yield ("chunk", {"content": "我先查一下"})
+        yield ("trace_done", {"status": "completed"})
+        yield ("done", {"status": "completed", "run_id": "run-1"})
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={"conversation_id": None, "message": "查一下这个 IP"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: route" in body
+    assert '"route":"agent"' in body
+    assert "event: planner_done" in body
+    assert "event: trace_step" in body
+    assert "event: chunk" in body
+    assert "event: trace_done" in body
+    assert "event: done" in body
+
+
+def test_stream_chat_returns_chunk_and_chain_trace_when_thinking_enabled(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        assert request.thinking_enabled is True
+        yield ("conversation", {"conversation_id": "conv-1", "title": "新对话", "run_id": "run-1"})
+        yield (
+            "thought_step",
+            {
+                "step_id": "assistant-thought-1",
+                "type": "thought",
+                "status": "running",
+                "title": "理解问题",
+                "message": "先判断用户是在问候还是要发起任务。",
+                "timestamp": "2026-03-18T12:00:00+00:00",
+                "order": 0,
+            },
+        )
+        yield (
+            "trace_step",
+            {
+                "step_id": "search-1",
+                "type": "search",
+                "kind": "result_list",
+                "parent_step_id": "assistant-thought-1",
+                "status": "success",
+                "message": "已搜索到候选结果",
+                "timestamp": "2026-03-18T12:00:00+00:00",
+                "order": 1,
+                "payload": {"items": [{"title": "结果1", "url": "https://example.com"}]},
+            },
+        )
+        yield ("chunk", {"content": "你"})
+        yield ("chunk", {"content": "好"})
+        yield (
+            "thought_step",
+            {
+                "step_id": "assistant-thought-1",
+                "type": "thought",
+                "status": "success",
+                "title": "理解问题",
+                "message": "确认这是简单问候，直接给出礼貌回应。",
+                "timestamp": "2026-03-18T12:00:01+00:00",
+                "order": 0,
+            },
+        )
+        yield ("trace_done", {"status": "completed"})
+        yield ("done", {"status": "completed", "run_id": "run-1"})
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={"message": "你好", "thinking_enabled": True},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: conversation" in body
+    assert "event: chunk" in body
+    assert '"content":"你"' in body
+    assert '"content":"好"' in body
+    assert "event: thought_step" in body
+    assert "event: trace_step" in body
+    assert '"kind":"result_list"' in body
+    assert '"parent_step_id":"assistant-thought-1"' in body
+    assert "event: trace_done" in body
+    assert "event: reasoning_chunk" not in body
+    assert "event: reasoning_done" not in body
+    assert "event: done" in body
+
+
+def test_stream_chat_accepts_thinking_enabled(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        assert request.thinking_enabled is True
+        yield ("conversation", {"conversation_id": "conv-1", "title": "新对话", "run_id": "run-1"})
+        yield ("done", {"status": "completed", "run_id": "run-1"})
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={"message": "你好", "thinking_enabled": True},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: conversation" in body
+    assert "event: done" in body
+
+
+def test_stream_chat_returns_stopped_done_status(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        yield ("conversation", {"conversation_id": "conv-1", "title": "新对话", "run_id": "run-1"})
+        yield ("chunk", {"content": "部分回答"})
+        yield ("done", {"status": "stopped", "run_id": "run-1"})
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={"message": "你好"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert '"status":"stopped"' in body
+    assert '"run_id":"run-1"' in body
+
+
+def test_stop_chat_run_returns_202(client, monkeypatch):
+    async def fake_request_stop_chat_run(run_id):
+        assert str(run_id) == "8bc85d87-ea36-46de-aeeb-d26c17e57ef3"
+        return {"run_id": str(run_id), "status": "stop_requested"}
+
+    monkeypatch.setattr(chat_api, "request_stop_chat_run", fake_request_stop_chat_run)
+
+    response = client.post("/api/chat/runs/8bc85d87-ea36-46de-aeeb-d26c17e57ef3/stop")
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "run_id": "8bc85d87-ea36-46de-aeeb-d26c17e57ef3",
+        "status": "stop_requested",
+    }
+
+
+def test_stop_chat_run_returns_404(client, monkeypatch):
+    async def fake_request_stop_chat_run(run_id):
+        raise chat_api.ChatRunNotFoundError("chat run not found")
+
+    monkeypatch.setattr(chat_api, "request_stop_chat_run", fake_request_stop_chat_run)
+
+    response = client.post("/api/chat/runs/8bc85d87-ea36-46de-aeeb-d26c17e57ef3/stop")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "chat run not found"}
+
+
+@pytest.mark.parametrize(
+    ("payload", "field_name"),
+    [
+        ({"message": ""}, "message"),
+        ({"conversation_id": "not-a-uuid", "message": "hi"}, "conversation_id"),
+    ],
+)
+def test_stream_chat_validates_request_body(client, payload, field_name):
+    response = client.post("/api/chat/stream", json=payload)
+
+    assert response.status_code == 422
+    assert field_name in response.text
+
+
+def test_stream_chat_returns_500_when_config_missing(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        raise ConfigurationError("DATABASE_URL is not configured")
+        yield
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    response = client.post("/api/chat/stream", json={"message": "你好"})
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "DATABASE_URL is not configured"}
+
+
+def test_stream_chat_returns_404_when_conversation_missing(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        raise ConversationNotFoundError("conversation not found")
+        yield
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    response = client.post(
+        "/api/chat/stream",
+        json={"conversation_id": "8bc85d87-ea36-46de-aeeb-d26c17e57ef3", "message": "你好"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "conversation not found"}
+
+
+def test_stream_chat_returns_502_when_upstream_fails_before_stream(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        raise UpstreamServiceError("model upstream failed")
+        yield
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    response = client.post("/api/chat/stream", json={"message": "你好"})
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "model upstream failed"}
+
+
+def test_cors_preflight_returns_allow_origin_header(client):
+    response = client.options(
+        "/api/chat/stream",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"

@@ -1,0 +1,87 @@
+### 健康检查
+GET http://127.0.0.1:8000/
+
+### 显式新建空会话
+POST http://127.0.0.1:8000/api/conversations
+
+### 新建会话并流式聊天
+# 运行前请先在 .env 中配置 ANTHROPIC_API_KEY、ANTHROPIC_MODEL，必要时可额外配置 ANTHROPIC_BASE_URL
+# thinking_enabled=true 会进入主聊天流，并返回 chunk + 链式 trace_step/trace_done
+# 请从首个 conversation 事件里记录 run_id，供“终止当前生成”接口使用
+POST http://127.0.0.1:8000/api/chat/stream
+Content-Type: application/json
+
+{
+  "conversation_id": "{{conversation_id}}",
+  "message": "查一下 207.97.137.107",
+  "thinking_enabled": true
+}
+
+### Planner 路由模式：首次发消息时隐式创建会话
+# thinking_enabled=false 会先做路由，再继续回复
+# 如果命中 simple，只返回 chunk；如果命中 complex/agent，才会返回 route/planner_done + trace_step
+POST http://127.0.0.1:8000/api/chat/stream
+Content-Type: application/json
+
+{
+  "message": "你好",
+  "thinking_enabled": false
+}
+
+### Planner 命中复杂路径
+POST http://127.0.0.1:8000/api/chat/stream
+Content-Type: application/json
+
+{
+  "message": "帮我查一下这个 IP 的归属和来源",
+  "thinking_enabled": false
+}
+
+### 终止当前生成
+# 将 {{run_id}} 替换成当前 SSE 首个 conversation 事件返回的 run_id
+POST http://127.0.0.1:8000/api/chat/runs/{{run_id}}/stop
+
+### 查询会话列表
+GET http://127.0.0.1:8000/api/conversations
+
+### 查询单个会话详情
+GET http://127.0.0.1:8000/api/conversations/{{conversation_id}}
+
+### 更新会话标题
+PATCH http://127.0.0.1:8000/api/conversations/{{conversation_id}}
+Content-Type: application/json
+
+{
+  "title": "短期记忆设计讨论"
+}
+
+### 删除会话
+DELETE http://127.0.0.1:8000/api/conversations/{{conversation_id}}
+
+@anthropic_base_url = https://api.minimaxi.com/anthropic
+@planner_model = MiniMax-M2
+@planner_user_message = 帮我查一下这个 IP 的归属和来源
+@run_id = 6e0f1938-897a-4dda-b17c-1c33d7ef8d24
+
+### 直连上游模型：复现 planner 请求
+# 目的：验证 route/plan/tools 的原始模型输出，而不是经过服务端 SSE 包装后的结果
+# 运行前请在 HTTP Client 环境中提供 anthropic_api_key 变量，或手动替换下面请求头
+POST {{anthropic_base_url}}/v1/messages
+x-api-key: {{anthropic_api_key}}
+anthropic-version: 2023-06-01
+content-type: application/json
+
+{
+  "model": "{{planner_model}}",
+  "max_tokens": 256,
+  "thinking": {
+    "type": "disabled"
+  },
+  "system": "You are the reasoning and execution planner for an AI chat system. Your job is NOT to answer the user directly. Classify the request into one of: simple, complex, agent. If route is simple, return exactly {\"route\":\"simple\"}. If route is complex, return exactly {\"route\":\"complex\",\"plan\":[...]}. If route is agent, return exactly {\"route\":\"agent\",\"plan\":[...],\"tools\":[...]}. Allowed tools: web_search, http_fetch. Always return valid JSON only. Do not wrap JSON in markdown. Do not include any explanation or extra keys.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "{{planner_user_message}}"
+    }
+  ]
+}

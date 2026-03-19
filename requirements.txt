@@ -1,0 +1,9 @@
+asyncpg
+fastapi
+httpx
+langchain
+langchain-anthropic
+pydantic
+pytest
+sqlalchemy
+uvicorn
