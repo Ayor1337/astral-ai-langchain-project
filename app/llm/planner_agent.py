@@ -10,7 +10,7 @@ from app.core.config import ConfigurationError, get_settings
 from app.llm.base import UpstreamServiceError, disabled_thinking, extract_text_content
 
 PLANNER_TOOL_WHITELIST = ("web_search", "http_fetch")
-PLANNER_MODEL_NAME = "MiniMax-M2"
+PLANNER_MODEL_NAME = "MiniMax-M2.1-highspeed"
 
 
 def _resolve_planner_agent_config() -> tuple[str, str | None, str]:
