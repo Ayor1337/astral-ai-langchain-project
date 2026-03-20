@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 ChatEvent: TypeAlias = tuple[str, dict[str, Any]]
 TRACE_BLOCK_TYPES = {"search", "fetch", "tool_call", "tool_result", "retry", "other"}
 TRACE_STEP_STATUSES = {"pending", "running", "success", "error", "skipped"}
-THOUGHT_STEP_TIMEOUT_SECONDS = 1.0
+THOUGHT_STEP_TIMEOUT_SECONDS = 99
 THOUGHT_ORDER_BASE = -1000
 _background_tasks: set[asyncio.Task[Any]] = set()
 

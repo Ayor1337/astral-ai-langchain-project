@@ -27,5 +27,6 @@ class AnthropicProvider:
             base_url=endpoint.base_url,
             model=endpoint.model,
             streaming=streaming,
+            temperature=0.7,
             thinking=_adaptive_thinking() if thinking_enabled else _disabled_thinking(),
         )
