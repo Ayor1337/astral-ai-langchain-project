@@ -1,16 +1,13 @@
 from collections.abc import AsyncIterator, Sequence
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_anthropic import ChatAnthropic
 
-from app.core.config import ConfigurationError, get_settings
+from app.core.config import ModelEndpointSettings, get_settings
+from app.llm.exceptions import ThinkingNotSupportedError, UpstreamServiceError
+from app.llm.providers import get_provider
 from app.schemas.chat import ChatMessage
 
 ContentBlock = dict[str, object]
-
-
-class UpstreamServiceError(Exception):
-    pass
 
 
 def _is_mapping(value: object) -> bool:
@@ -65,14 +62,6 @@ def extract_text_content(content: object) -> str:
     return "".join(text_chunks)
 
 
-def disabled_thinking() -> dict[str, str]:
-    return {"type": "disabled"}
-
-
-def adaptive_thinking() -> dict[str, str]:
-    return {"type": "adaptive", "display": "summarized"}
-
-
 def _to_langchain_message(message: ChatMessage) -> SystemMessage | HumanMessage | AIMessage:
     content: str | list[ContentBlock]
     if message.role == "assistant" and message.content_blocks:
@@ -87,17 +76,31 @@ def _to_langchain_message(message: ChatMessage) -> SystemMessage | HumanMessage 
     return HumanMessage(content=content)
 
 
-def _create_model(*, streaming: bool, thinking_enabled: bool = False) -> ChatAnthropic:
-    settings = get_settings()
-    if not settings.anthropic_api_key:
-        raise ConfigurationError("ANTHROPIC_API_KEY is not configured")
-
-    return ChatAnthropic(
-        api_key=settings.anthropic_api_key,
-        base_url=settings.anthropic_base_url,
-        model=settings.anthropic_model,
+def create_chat_model(
+    *,
+    endpoint: ModelEndpointSettings,
+    streaming: bool,
+    thinking_enabled: bool = False,
+):
+    provider = get_provider(endpoint.provider)
+    return provider.create_chat_model(
+        endpoint=endpoint,
         streaming=streaming,
-        thinking=adaptive_thinking() if thinking_enabled else disabled_thinking(),
+        thinking_enabled=thinking_enabled,
+    )
+
+
+def validate_chat_capabilities(
+    *,
+    endpoint: ModelEndpointSettings,
+    thinking_enabled: bool = False,
+) -> None:
+    if not thinking_enabled:
+        return
+    create_chat_model(
+        endpoint=endpoint,
+        streaming=True,
+        thinking_enabled=True,
     )
 
 
@@ -106,7 +109,11 @@ async def build_chat_stream(
     *,
     thinking_enabled: bool = False,
 ) -> AsyncIterator[ContentBlock | str]:
-    model = _create_model(streaming=True, thinking_enabled=thinking_enabled)
+    model = create_chat_model(
+        endpoint=get_settings().chat_endpoint,
+        streaming=True,
+        thinking_enabled=thinking_enabled,
+    )
     langchain_messages = [_to_langchain_message(message) for message in messages]
 
     async def iterator() -> AsyncIterator[ContentBlock | str]:
@@ -144,7 +151,11 @@ async def generate_summary(
     if not messages:
         return previous_summary or ""
 
-    model = _create_model(streaming=False, thinking_enabled=False)
+    model = create_chat_model(
+        endpoint=get_settings().chat_endpoint,
+        streaming=False,
+        thinking_enabled=False,
+    )
     summary_prompt = [
         SystemMessage(
             content=(

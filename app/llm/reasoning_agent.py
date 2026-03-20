@@ -2,10 +2,9 @@ import json
 from collections.abc import AsyncIterator
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_anthropic import ChatAnthropic
 
-from app.core.config import ConfigurationError, get_settings
-from app.llm.base import UpstreamServiceError, disabled_thinking, extract_text_content
+from app.core.config import ModelEndpointSettings, get_settings
+from app.llm.base import UpstreamServiceError, create_chat_model, extract_text_content
 
 MAX_REASONING_SUMMARY_LENGTH = 500
 REASONING_CHUNK_SIZE = 24
@@ -13,14 +12,8 @@ MAX_THOUGHT_TITLE_LENGTH = 32
 MAX_THOUGHT_MESSAGE_LENGTH = 120
 
 
-def _resolve_reasoning_agent_config() -> tuple[str, str | None, str]:
-    settings = get_settings()
-    api_key = settings.anthropic_api_key
-    base_url = settings.anthropic_base_url
-    model = settings.title_agent_model or settings.anthropic_model
-    if not api_key:
-        raise ConfigurationError("ANTHROPIC_API_KEY is not configured")
-    return api_key, base_url, model
+def _resolve_reasoning_agent_config() -> ModelEndpointSettings:
+    return get_settings().reasoning_agent_endpoint
 
 
 def _normalize_summary(raw_summary: object) -> str:
@@ -99,13 +92,9 @@ async def generate_reasoning_summary(*, user_message: str, assistant_message: st
     if not user_message.strip() or not assistant_message.strip():
         return ""
 
-    api_key, base_url, model_name = _resolve_reasoning_agent_config()
-    model = ChatAnthropic(
-        api_key=api_key,
-        base_url=base_url,
-        model=model_name,
+    model = create_chat_model(
+        endpoint=_resolve_reasoning_agent_config(),
         streaming=False,
-        thinking=disabled_thinking(),
     )
     prompt = [
         SystemMessage(
@@ -141,13 +130,9 @@ async def generate_thought_steps(
     if not user_message.strip() or not raw_thinking.strip():
         return []
 
-    api_key, base_url, model_name = _resolve_reasoning_agent_config()
-    model = ChatAnthropic(
-        api_key=api_key,
-        base_url=base_url,
-        model=model_name,
+    model = create_chat_model(
+        endpoint=_resolve_reasoning_agent_config(),
         streaming=False,
-        thinking=disabled_thinking(),
     )
     existing_steps_json = json.dumps(existing_steps or [], ensure_ascii=False, separators=(",", ":"))
     prompt = [

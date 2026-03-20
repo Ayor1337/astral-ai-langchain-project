@@ -1,6 +1,6 @@
 # AstralAI
 
-AstralAI 是一个基于 FastAPI 的轻量级 AI 聊天后端，提供流式聊天、会话管理和 PostgreSQL 持久化能力。当前实现围绕 Anthropic 兼容模型接入，支持两类交互模式：
+AstralAI 是一个基于 FastAPI 的轻量级 AI 聊天后端，提供流式聊天、会话管理和 PostgreSQL 持久化能力。当前实现围绕可配置 provider 的 LLM 接入层，首批内置 `anthropic` 与 `openai`，支持两类交互模式：
 
 - `thinking_enabled=true`：直接进入主聊天流，返回回答分片与链式执行轨迹。
 - `thinking_enabled=false`：先进行 simple / complex / agent 路由，再根据路由结果继续输出。
@@ -30,7 +30,7 @@ AstralAI 的前端项目位于：
 - FastAPI
 - Uvicorn
 - PostgreSQL
-- Anthropic 兼容模型接口
+- 可切换的 `anthropic` / `openai` 模型接口
 
 ## 快速开始
 
@@ -67,16 +67,20 @@ copy .env.example .env
 然后至少补齐以下配置：
 
 ```env
-ANTHROPIC_API_KEY=your-anthropic-api-key
-ANTHROPIC_MODEL=your-anthropic-model
+LLM_PROVIDER=anthropic
+LLM_API_KEY=your-api-key
+LLM_MODEL=your-model-name
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/astral_ai
 ```
 
-如果你使用的是兼容 Anthropic API 的代理服务，也可以额外配置：
+如果你使用自定义代理地址或希望让辅助 agent 走不同 provider，也可以额外配置：
 
 ```env
-ANTHROPIC_BASE_URL=https://your-provider.example.com/anthropic
-TITLE_AGENT_MODEL=your-title-model
+LLM_BASE_URL=https://your-provider.example.com
+TITLE_AGENT_PROVIDER=openai
+TITLE_AGENT_API_KEY=your-title-agent-key
+TITLE_AGENT_BASE_URL=https://api.openai.com/v1
+TITLE_AGENT_MODEL=gpt-4o-mini
 ```
 
 ### 4. 启动服务
@@ -111,15 +115,20 @@ https://github.com/Ayor1337/astral-ai-web
 
 | 变量名 | 说明 |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | 必填，上游模型服务密钥 |
-| `ANTHROPIC_BASE_URL` | 可选，Anthropic 兼容服务的基础地址，必须以 `http://` 或 `https://` 开头 |
-| `ANTHROPIC_MODEL` | 必填，主聊天模型名称 |
-| `TITLE_AGENT_MODEL` | 可选，用于异步生成会话标题的模型名称 |
+| `LLM_PROVIDER` | 必填，默认聊天 provider，当前仅支持 `anthropic` 与 `openai` |
+| `LLM_API_KEY` | 必填，默认聊天 provider 的上游密钥 |
+| `LLM_BASE_URL` | 可选，默认聊天 provider 的基础地址，必须以 `http://` 或 `https://` 开头 |
+| `LLM_MODEL` | 必填，默认聊天模型名称 |
+| `TITLE_AGENT_*` / `REASONING_AGENT_*` / `PLANNER_AGENT_*` | 可选，按字段覆盖对应辅助 agent 的 provider、凭证、地址与模型；未配置时逐项回退到 `LLM_*` |
 | `DATABASE_URL` | PostgreSQL 连接串，仅支持 `postgresql://` 或 `postgresql+asyncpg://` |
 | `MEMORY_WINDOW_SIZE` | 短期记忆窗口大小，必须大于 0 |
 | `MEMORY_SUMMARY_TRIGGER` | 触发摘要整理的阈值，必须大于 `MEMORY_WINDOW_SIZE` |
 
 配置校验逻辑位于 `app/core/config.py`，启动或请求处理期间如果发现配置错误，会直接返回稳定的错误响应。
+需要注意：
+
+- `thinking_enabled=true` 目前只支持 `anthropic` provider。
+- 当默认聊天 provider 为 `openai` 且请求开启 `thinking_enabled` 时，接口会直接返回 400。
 
 ## API 概览
 

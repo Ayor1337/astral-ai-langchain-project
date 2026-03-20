@@ -7,7 +7,7 @@ from typing import Any, TypeAlias
 
 from app.core.config import get_settings
 from app.db.session import get_session_factory
-from app.llm.base import UpstreamServiceError, build_chat_stream
+from app.llm.base import UpstreamServiceError, build_chat_stream, validate_chat_capabilities
 from app.llm.reasoning_agent import generate_thought_steps
 from app.llm.planner_agent import plan_execution_route
 from app.llm.title_agent import generate_conversation_title
@@ -302,6 +302,11 @@ def _schedule_background_title_generation(
 async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
     settings = get_settings()
     session_factory = get_session_factory()
+    if request.thinking_enabled:
+        validate_chat_capabilities(
+            endpoint=settings.chat_endpoint,
+            thinking_enabled=True,
+        )
 
     async with session_factory() as session:
         repository = ConversationRepository(session)

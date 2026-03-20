@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
+from app.core.config import ModelEndpointSettings
 from app.llm.base import build_chat_stream
 from app.llm.planner_agent import plan_execution_route
 from app.llm.reasoning_agent import generate_reasoning_summary, generate_thought_steps
@@ -24,7 +25,10 @@ async def test_generate_conversation_title_extracts_text_block_only():
 
     model = SimpleNamespace(ainvoke=fake_ainvoke)
 
-    with patch("app.llm.title_agent.ChatAnthropic", return_value=model):
+    with (
+        patch("app.llm.title_agent.get_settings", return_value=SimpleNamespace(title_agent_endpoint=ModelEndpointSettings(provider="anthropic", api_key="title-key", base_url=None, model="claude-title-model"))),
+        patch("app.llm.title_agent.create_chat_model", return_value=model),
+    ):
         title = await generate_conversation_title(
             [
                 ChatMessage(role="user", content="你好"),
@@ -49,7 +53,10 @@ async def test_generate_reasoning_summary_extracts_text_block_only():
 
     model = SimpleNamespace(ainvoke=fake_ainvoke)
 
-    with patch("app.llm.reasoning_agent.ChatAnthropic", return_value=model):
+    with (
+        patch("app.llm.reasoning_agent.get_settings", return_value=SimpleNamespace(reasoning_agent_endpoint=ModelEndpointSettings(provider="anthropic", api_key="reasoning-key", base_url=None, model="claude-reasoning-model"))),
+        patch("app.llm.reasoning_agent.create_chat_model", return_value=model),
+    ):
         summary = await generate_reasoning_summary(
             user_message="你好",
             assistant_message="你好！有什么我可以帮助你的吗？",
@@ -74,7 +81,10 @@ async def test_generate_thought_steps_parses_json_text_block():
 
     model = SimpleNamespace(ainvoke=fake_ainvoke)
 
-    with patch("app.llm.reasoning_agent.ChatAnthropic", return_value=model):
+    with (
+        patch("app.llm.reasoning_agent.get_settings", return_value=SimpleNamespace(reasoning_agent_endpoint=ModelEndpointSettings(provider="anthropic", api_key="reasoning-key", base_url=None, model="claude-reasoning-model"))),
+        patch("app.llm.reasoning_agent.create_chat_model", return_value=model),
+    ):
         steps = await generate_thought_steps(
             user_message="查一下 207.97.137.107",
             raw_thinking="先搜索可用的 IP 信息来源。再准备整理搜索和抓取结果。",
@@ -95,7 +105,10 @@ async def test_build_chat_stream_emits_text_and_thinking_blocks():
 
     model = SimpleNamespace(astream=fake_astream)
 
-    with patch("app.llm.base._create_model", return_value=model):
+    with (
+        patch("app.llm.base.get_settings", return_value=SimpleNamespace(chat_endpoint=ModelEndpointSettings(provider="anthropic", api_key="chat-key", base_url=None, model="claude-chat-model"))),
+        patch("app.llm.base.create_chat_model", return_value=model),
+    ):
         stream = await build_chat_stream([ChatMessage(role="user", content="你好")], thinking_enabled=True)
         chunks = [chunk async for chunk in stream]
 
@@ -112,7 +125,10 @@ async def test_build_chat_stream_passthroughs_custom_trace_blocks():
 
     model = SimpleNamespace(astream=fake_astream)
 
-    with patch("app.llm.base._create_model", return_value=model):
+    with (
+        patch("app.llm.base.get_settings", return_value=SimpleNamespace(chat_endpoint=ModelEndpointSettings(provider="anthropic", api_key="chat-key", base_url=None, model="claude-chat-model"))),
+        patch("app.llm.base.create_chat_model", return_value=model),
+    ):
         stream = await build_chat_stream([ChatMessage(role="user", content="查 IP")], thinking_enabled=True)
         chunks = [chunk async for chunk in stream]
 
@@ -136,7 +152,10 @@ async def test_plan_execution_route_normalizes_agent_payload():
 
     model = SimpleNamespace(ainvoke=fake_ainvoke)
 
-    with patch("app.llm.planner_agent.ChatAnthropic", return_value=model):
+    with (
+        patch("app.llm.planner_agent.get_settings", return_value=SimpleNamespace(planner_agent_endpoint=ModelEndpointSettings(provider="anthropic", api_key="planner-key", base_url=None, model="claude-planner-model"))),
+        patch("app.llm.planner_agent.create_chat_model", return_value=model),
+    ):
         result = await plan_execution_route(message="查一下这个 IP")
 
     assert result == {
@@ -147,7 +166,7 @@ async def test_plan_execution_route_normalizes_agent_payload():
 
 
 @pytest.mark.anyio
-async def test_plan_execution_route_uses_minimax_m2_model():
+async def test_plan_execution_route_uses_configured_planner_model():
     response = SimpleNamespace(content=[{"type": "text", "text": '{"route":"simple"}'}])
 
     async def fake_ainvoke(prompt):
@@ -155,7 +174,17 @@ async def test_plan_execution_route_uses_minimax_m2_model():
 
     model = SimpleNamespace(ainvoke=fake_ainvoke)
 
-    with patch("app.llm.planner_agent.ChatAnthropic", return_value=model) as mocked_chat_anthropic:
+    planner_endpoint = ModelEndpointSettings(
+        provider="openai",
+        api_key="planner-key",
+        base_url="https://openai.example.com",
+        model="gpt-4o-mini",
+    )
+
+    with (
+        patch("app.llm.planner_agent.get_settings", return_value=SimpleNamespace(planner_agent_endpoint=planner_endpoint)),
+        patch("app.llm.planner_agent.create_chat_model", return_value=model) as mocked_create_chat_model,
+    ):
         await plan_execution_route(message="你好")
 
-    assert mocked_chat_anthropic.call_args.kwargs["model"] == "MiniMax-M2"
+    assert mocked_create_chat_model.call_args.kwargs["endpoint"] == planner_endpoint

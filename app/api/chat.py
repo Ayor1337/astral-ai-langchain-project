@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.core.config import ConfigurationError
-from app.llm.base import UpstreamServiceError
+from app.llm.base import ThinkingNotSupportedError, UpstreamServiceError
 from app.schemas.chat import ChatRequest, ChatRunStopResponse
 from app.services.chat_runs import request_stop_chat_run
 from app.services.chat_service import stream_chat_events
@@ -47,6 +47,7 @@ async def _resolve_stream(request: ChatRequest) -> AsyncIterator[tuple[str, dict
     ),
     responses={
         200: {"description": "SSE 流式响应"},
+        400: {"description": "当前 provider 不支持请求的能力"},
         404: {"description": "会话不存在"},
         500: {"description": "服务配置错误"},
         502: {"description": "上游模型服务错误"},
@@ -60,6 +61,8 @@ async def stream_chat(request: ChatRequest) -> StreamingResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ThinkingNotSupportedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UpstreamServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except StopAsyncIteration:

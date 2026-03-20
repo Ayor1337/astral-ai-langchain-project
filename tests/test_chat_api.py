@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 import app.api.chat as chat_api
 from app.core.config import ConfigurationError
-from app.llm.base import UpstreamServiceError
+from app.llm.base import ThinkingNotSupportedError, UpstreamServiceError
 from app.main import app
 from app.services.exceptions import ConversationNotFoundError
 
@@ -289,6 +289,19 @@ def test_stream_chat_returns_502_when_upstream_fails_before_stream(client, monke
 
     assert response.status_code == 502
     assert response.json() == {"detail": "model upstream failed"}
+
+
+def test_stream_chat_returns_400_when_thinking_not_supported(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        raise ThinkingNotSupportedError("provider openai does not support thinking")
+        yield
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    response = client.post("/api/chat/stream", json={"message": "你好", "thinking_enabled": True})
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "provider openai does not support thinking"}
 
 
 def test_cors_preflight_returns_allow_origin_header(client):

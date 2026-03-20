@@ -24,24 +24,37 @@
 服务启动前需要在项目根目录配置环境变量或 `.env` 文件。
 
 ```env
-ANTHROPIC_API_KEY=your-anthropic-api-key
-ANTHROPIC_BASE_URL=
-ANTHROPIC_MODEL=your-anthropic-model
+LLM_PROVIDER=anthropic
+LLM_API_KEY=your-api-key
+LLM_BASE_URL=
+LLM_MODEL=your-model-name
+TITLE_AGENT_PROVIDER=
+TITLE_AGENT_API_KEY=
+TITLE_AGENT_BASE_URL=
 TITLE_AGENT_MODEL=
+REASONING_AGENT_PROVIDER=
+REASONING_AGENT_API_KEY=
+REASONING_AGENT_BASE_URL=
+REASONING_AGENT_MODEL=
+PLANNER_AGENT_PROVIDER=
+PLANNER_AGENT_API_KEY=
+PLANNER_AGENT_BASE_URL=
+PLANNER_AGENT_MODEL=
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/astral_ai
 MEMORY_WINDOW_SIZE=8
 MEMORY_SUMMARY_TRIGGER=12
 ```
 
 说明：
-- `ANTHROPIC_API_KEY`：Anthropic API Key，必填。
-- `ANTHROPIC_BASE_URL`：Anthropic 自定义服务地址，可选；为空时使用官方默认地址。
-- `ANTHROPIC_MODEL`：Anthropic 主聊天模型名称，必填。
-- planner 路由模型当前固定为 `MiniMax-M2`。
-- `TITLE_AGENT_MODEL`：标题代理使用的可选模型名称；为空时回退 `ANTHROPIC_MODEL`。
+- `LLM_PROVIDER`：默认聊天 provider，必填，当前仅支持 `anthropic` 与 `openai`。
+- `LLM_API_KEY`：默认聊天 provider 的 API Key，必填。
+- `LLM_BASE_URL`：默认聊天 provider 的自定义服务地址，可选。
+- `LLM_MODEL`：默认聊天模型名称，必填。
+- `TITLE_AGENT_*` / `REASONING_AGENT_*` / `PLANNER_AGENT_*`：辅助 agent 的可选覆盖配置；未填写字段会逐项回退到 `LLM_*`。
 - `DATABASE_URL`：PostgreSQL 连接地址，必填。
 - `MEMORY_WINDOW_SIZE`：短期记忆窗口大小，默认 `8`。
 - `MEMORY_SUMMARY_TRIGGER`：触发摘要压缩的消息数阈值，默认 `12`，必须大于 `MEMORY_WINDOW_SIZE`。
+- `thinking_enabled=true` 当前仅支持 `anthropic`；若默认聊天 provider 为 `openai`，接口会返回 `400`。
 
 ## 会话接口
 
@@ -429,7 +442,15 @@ data: {"status":"stopped","run_id":"6e0f1938-897a-4dda-b17c-1c33d7ef8d24"}
 
 ```json
 {
-  "detail": "ANTHROPIC_BASE_URL must start with http:// or https://"
+  "detail": "LLM_BASE_URL must start with http:// or https://"
+}
+```
+
+### 400 provider 能力不支持
+
+```json
+{
+  "detail": "provider openai does not support thinking"
 }
 ```
 

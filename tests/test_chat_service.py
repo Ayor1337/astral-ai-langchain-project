@@ -4,10 +4,12 @@ import asyncio
 import unittest
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 from unittest.mock import AsyncMock, patch
 
-from app.llm.base import UpstreamServiceError
+from app.core.config import ModelEndpointSettings
+from app.llm.base import ThinkingNotSupportedError, UpstreamServiceError
 from app.schemas.chat import ChatRequest
 from app.services.chat_runs import clear_chat_runs, request_stop_chat_run
 from app.services.chat_service import stream_chat_events
@@ -24,6 +26,18 @@ async def wait_for_condition(predicate, *, timeout: float = 1.0) -> None:
         if loop.time() >= deadline:
             raise AssertionError("condition not met before timeout")
         await asyncio.sleep(0)
+
+
+def fake_settings(*, provider: str = "anthropic") -> SimpleNamespace:
+    return SimpleNamespace(
+        memory_window_size=8,
+        chat_endpoint=ModelEndpointSettings(
+            provider=provider,
+            api_key="test-key",
+            base_url=None,
+            model="test-model",
+        ),
+    )
 
 
 @dataclass
@@ -179,7 +193,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -216,7 +230,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -244,6 +258,26 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(repository.messages[-1].reasoning_summary)
         self.assertIsNone(repository.messages[-1].trace_steps)
         generate_title.assert_awaited_once()
+
+    async def test_thinking_enabled_unsupported_provider_raises_before_stream_consumption(self):
+        repository = FakeRepository()
+        session_factory = FakeSessionFactory()
+
+        with (
+            patch("app.services.chat_service.get_settings", return_value=fake_settings(provider="openai")),
+            patch("app.services.chat_service.get_session_factory", return_value=session_factory),
+            patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
+            patch(
+                "app.services.chat_service.validate_chat_capabilities",
+                side_effect=ThinkingNotSupportedError("provider openai does not support thinking"),
+            ),
+        ):
+            with self.assertRaises(ThinkingNotSupportedError) as context:
+                await stream_chat_events(ChatRequest(message="你好", thinking_enabled=True))
+
+        self.assertEqual(str(context.exception), "provider openai does not support thinking")
+        self.assertEqual(len(repository.messages), 0)
+        self.assertIsNone(repository.conversation)
 
     async def test_thinking_enabled_emits_chain_trace_and_persists_structured_steps(self):
         repository = FakeRepository()
@@ -358,7 +392,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -432,7 +466,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -490,7 +524,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -527,7 +561,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -560,7 +594,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -610,7 +644,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -654,7 +688,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -706,7 +740,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -760,7 +794,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -811,7 +845,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -845,7 +879,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
@@ -898,7 +932,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             return iterator()
 
         with (
-            patch("app.services.chat_service.get_settings", return_value=type("S", (), {"memory_window_size": 8})()),
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),

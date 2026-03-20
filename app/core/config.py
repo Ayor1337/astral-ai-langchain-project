@@ -3,17 +3,27 @@ from functools import lru_cache
 import os
 from pathlib import Path
 
+SUPPORTED_PROVIDERS = ("anthropic", "openai")
+
 
 class ConfigurationError(Exception):
     pass
 
 
 @dataclass(frozen=True)
+class ModelEndpointSettings:
+    provider: str
+    api_key: str
+    base_url: str | None
+    model: str
+
+
+@dataclass(frozen=True)
 class Settings:
-    anthropic_api_key: str
-    anthropic_base_url: str | None
-    anthropic_model: str
-    title_agent_model: str | None
+    chat_endpoint: ModelEndpointSettings
+    title_agent_endpoint: ModelEndpointSettings
+    reasoning_agent_endpoint: ModelEndpointSettings
+    planner_agent_endpoint: ModelEndpointSettings
     database_url: str
     memory_window_size: int
     memory_summary_trigger: int
@@ -56,20 +66,52 @@ def _get_int_setting(name: str, default: int) -> int:
         raise ConfigurationError(f"{name} must be an integer") from exc
 
 
+def _build_endpoint_settings(prefix: str, fallback: ModelEndpointSettings | None = None) -> ModelEndpointSettings:
+    provider = _get_setting_value(f"{prefix}_PROVIDER") or (fallback.provider if fallback else "")
+    api_key = _get_setting_value(f"{prefix}_API_KEY") or (fallback.api_key if fallback else "")
+    raw_base_url = _get_setting_value(f"{prefix}_BASE_URL")
+    base_url = raw_base_url or (fallback.base_url if fallback else None)
+    model = _get_setting_value(f"{prefix}_MODEL") or (fallback.model if fallback else "")
+    return ModelEndpointSettings(
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+    )
+
+
+def _validate_endpoint_settings(prefix: str, endpoint: ModelEndpointSettings) -> ModelEndpointSettings:
+    provider = endpoint.provider.strip().lower()
+    if provider not in SUPPORTED_PROVIDERS:
+        raise ConfigurationError(
+            f"{prefix}_PROVIDER must be one of: {', '.join(SUPPORTED_PROVIDERS)}"
+        )
+
+    api_key = endpoint.api_key.strip()
+    if not api_key:
+        raise ConfigurationError(f"{prefix}_API_KEY is not configured")
+
+    model = endpoint.model.strip()
+    if not model:
+        raise ConfigurationError(f"{prefix}_MODEL is not configured")
+
+    base_url = endpoint.base_url.strip() if isinstance(endpoint.base_url, str) else None
+    if base_url and not base_url.startswith(("http://", "https://")):
+        raise ConfigurationError(f"{prefix}_BASE_URL must start with http:// or https://")
+
+    return ModelEndpointSettings(
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url or None,
+        model=model,
+    )
+
+
 def validate_settings(settings: Settings) -> Settings:
-    if not settings.anthropic_api_key:
-        raise ConfigurationError("ANTHROPIC_API_KEY is not configured")
-
-    if settings.anthropic_base_url and not settings.anthropic_base_url.startswith(("http://", "https://")):
-        if settings.anthropic_model.startswith(("http://", "https://")):
-            raise ConfigurationError(
-                "ANTHROPIC_BASE_URL looks invalid and ANTHROPIC_MODEL looks like a URL. "
-                "Check whether ANTHROPIC_BASE_URL and ANTHROPIC_MODEL are swapped."
-            )
-        raise ConfigurationError("ANTHROPIC_BASE_URL must start with http:// or https://")
-
-    if not settings.anthropic_model:
-        raise ConfigurationError("ANTHROPIC_MODEL is not configured")
+    chat_endpoint = _validate_endpoint_settings("LLM", settings.chat_endpoint)
+    title_agent_endpoint = _validate_endpoint_settings("TITLE_AGENT", settings.title_agent_endpoint)
+    reasoning_agent_endpoint = _validate_endpoint_settings("REASONING_AGENT", settings.reasoning_agent_endpoint)
+    planner_agent_endpoint = _validate_endpoint_settings("PLANNER_AGENT", settings.planner_agent_endpoint)
 
     if settings.database_url and not settings.database_url.startswith(
         ("postgresql://", "postgresql+asyncpg://")
@@ -86,16 +128,25 @@ def validate_settings(settings: Settings) -> Settings:
             "MEMORY_SUMMARY_TRIGGER must be greater than MEMORY_WINDOW_SIZE"
         )
 
-    return settings
+    return Settings(
+        chat_endpoint=chat_endpoint,
+        title_agent_endpoint=title_agent_endpoint,
+        reasoning_agent_endpoint=reasoning_agent_endpoint,
+        planner_agent_endpoint=planner_agent_endpoint,
+        database_url=settings.database_url,
+        memory_window_size=settings.memory_window_size,
+        memory_summary_trigger=settings.memory_summary_trigger,
+    )
 
 
 @lru_cache
 def get_settings() -> Settings:
+    chat_endpoint = _build_endpoint_settings("LLM")
     settings = Settings(
-        anthropic_api_key=_get_setting_value("ANTHROPIC_API_KEY"),
-        anthropic_base_url=_get_setting_value("ANTHROPIC_BASE_URL") or None,
-        anthropic_model=_get_setting_value("ANTHROPIC_MODEL"),
-        title_agent_model=_get_setting_value("TITLE_AGENT_MODEL") or None,
+        chat_endpoint=chat_endpoint,
+        title_agent_endpoint=_build_endpoint_settings("TITLE_AGENT", chat_endpoint),
+        reasoning_agent_endpoint=_build_endpoint_settings("REASONING_AGENT", chat_endpoint),
+        planner_agent_endpoint=_build_endpoint_settings("PLANNER_AGENT", chat_endpoint),
         database_url=_get_setting_value("DATABASE_URL"),
         memory_window_size=_get_int_setting("MEMORY_WINDOW_SIZE", 8),
         memory_summary_trigger=_get_int_setting("MEMORY_SUMMARY_TRIGGER", 12),

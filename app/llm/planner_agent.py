@@ -3,24 +3,16 @@ from __future__ import annotations
 import json
 from json import JSONDecodeError
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.core.config import ConfigurationError, get_settings
-from app.llm.base import UpstreamServiceError, disabled_thinking, extract_text_content
+from app.core.config import ModelEndpointSettings, get_settings
+from app.llm.base import UpstreamServiceError, create_chat_model, extract_text_content
 
 PLANNER_TOOL_WHITELIST = ("web_search", "http_fetch")
-PLANNER_MODEL_NAME = "MiniMax-M2.1-highspeed"
 
 
-def _resolve_planner_agent_config() -> tuple[str, str | None, str]:
-    settings = get_settings()
-    api_key = settings.anthropic_api_key
-    base_url = settings.anthropic_base_url
-    model = PLANNER_MODEL_NAME
-    if not api_key:
-        raise ConfigurationError("ANTHROPIC_API_KEY is not configured")
-    return api_key, base_url, model
+def _resolve_planner_agent_config() -> ModelEndpointSettings:
+    return get_settings().planner_agent_endpoint
 
 
 def _extract_json_text(raw_text: str) -> str:
@@ -91,13 +83,9 @@ async def plan_execution_route(*, message: str) -> dict[str, object]:
     if not message.strip():
         raise ValueError("planner message must not be empty")
 
-    api_key, base_url, model_name = _resolve_planner_agent_config()
-    model = ChatAnthropic(
-        api_key=api_key,
-        base_url=base_url,
-        model=model_name,
+    model = create_chat_model(
+        endpoint=_resolve_planner_agent_config(),
         streaming=False,
-        thinking=disabled_thinking(),
     )
     prompt = [
         SystemMessage(
