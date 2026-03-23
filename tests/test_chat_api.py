@@ -14,7 +14,7 @@ def client():
         yield test_client
 
 
-def test_stream_chat_returns_chunk_only_when_thinking_disabled_hits_simple_route(client, monkeypatch):
+def test_stream_chat_returns_chunk_only_when_thinking_disabled(client, monkeypatch):
     async def fake_stream_chat_events(request):
         assert request.conversation_id is None
         assert request.message == "你好"
@@ -43,73 +43,27 @@ def test_stream_chat_returns_chunk_only_when_thinking_disabled_hits_simple_route
     assert '"content":"！"' in body
     assert "event: route" not in body
     assert "event: planner_done" not in body
-    assert "event: reasoning_chunk" not in body
-    assert "event: reasoning_done" not in body
+    assert "event: thinking_block" not in body
+    assert "event: trace_step" not in body
+    assert "event: trace_done" not in body
     assert "event: done" in body
 
 
-def test_stream_chat_returns_route_then_trace_when_thinking_disabled_hits_complex_route(client, monkeypatch):
-    async def fake_stream_chat_events(request):
-        assert request.thinking_enabled is False
-        yield ("conversation", {"conversation_id": "conv-1", "title": "新对话", "run_id": "run-1"})
-        yield (
-            "route",
-            {
-                "route": "agent",
-                "plan": ["搜索相关信息", "抓取候选链接"],
-                "tools": ["web_search", "http_fetch"],
-            },
-        )
-        yield ("planner_done", {"status": "completed"})
-        yield (
-            "trace_step",
-            {
-                "step_id": "search-1",
-                "type": "search",
-                "kind": "result_list",
-                "status": "success",
-                "message": "已搜索到候选结果",
-                "timestamp": "2026-03-18T12:00:00+00:00",
-                "order": 1,
-            },
-        )
-        yield ("chunk", {"content": "我先查一下"})
-        yield ("trace_done", {"status": "completed"})
-        yield ("done", {"status": "completed", "run_id": "run-1"})
-
-    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
-
-    with client.stream(
-        "POST",
-        "/api/chat/stream",
-        json={"conversation_id": None, "message": "查一下这个 IP"},
-    ) as response:
-        body = "".join(response.iter_text())
-
-    assert response.status_code == 200
-    assert "event: route" in body
-    assert '"route":"agent"' in body
-    assert "event: planner_done" in body
-    assert "event: trace_step" in body
-    assert "event: chunk" in body
-    assert "event: trace_done" in body
-    assert "event: done" in body
-
-
-def test_stream_chat_returns_chunk_and_chain_trace_when_thinking_enabled(client, monkeypatch):
+def test_stream_chat_returns_trace_steps_and_chunks_when_thinking_enabled(client, monkeypatch):
     async def fake_stream_chat_events(request):
         assert request.thinking_enabled is True
         yield ("conversation", {"conversation_id": "conv-1", "title": "新对话", "run_id": "run-1"})
         yield (
-            "thought_step",
+            "trace_step",
             {
-                "step_id": "assistant-thought-1",
-                "type": "thought",
-                "status": "running",
-                "title": "理解问题",
-                "message": "先判断用户是在问候还是要发起任务。",
+                "step_id": "thinking-1",
+                "type": "thinking",
+                "thinking": "先判断用户是在问候还是要发起任务。",
+                "signature": "sig-1",
+                "index": 0,
+                "status": "success",
                 "timestamp": "2026-03-18T12:00:00+00:00",
-                "order": 0,
+                "order": 1,
             },
         )
         yield (
@@ -118,28 +72,15 @@ def test_stream_chat_returns_chunk_and_chain_trace_when_thinking_enabled(client,
                 "step_id": "search-1",
                 "type": "search",
                 "kind": "result_list",
-                "parent_step_id": "assistant-thought-1",
                 "status": "success",
                 "message": "已搜索到候选结果",
-                "timestamp": "2026-03-18T12:00:00+00:00",
-                "order": 1,
+                "timestamp": "2026-03-18T12:00:01+00:00",
+                "order": 2,
                 "payload": {"items": [{"title": "结果1", "url": "https://example.com"}]},
             },
         )
         yield ("chunk", {"content": "你"})
         yield ("chunk", {"content": "好"})
-        yield (
-            "thought_step",
-            {
-                "step_id": "assistant-thought-1",
-                "type": "thought",
-                "status": "success",
-                "title": "理解问题",
-                "message": "确认这是简单问候，直接给出礼貌回应。",
-                "timestamp": "2026-03-18T12:00:01+00:00",
-                "order": 0,
-            },
-        )
         yield ("trace_done", {"status": "completed"})
         yield ("done", {"status": "completed", "run_id": "run-1"})
 
@@ -157,13 +98,11 @@ def test_stream_chat_returns_chunk_and_chain_trace_when_thinking_enabled(client,
     assert "event: chunk" in body
     assert '"content":"你"' in body
     assert '"content":"好"' in body
-    assert "event: thought_step" in body
-    assert "event: trace_step" in body
-    assert '"kind":"result_list"' in body
-    assert '"parent_step_id":"assistant-thought-1"' in body
+    assert "event: thinking_block" not in body
+    assert body.count("event: trace_step") == 2
+    assert '"type":"thinking"' in body
+    assert '"type":"search"' in body
     assert "event: trace_done" in body
-    assert "event: reasoning_chunk" not in body
-    assert "event: reasoning_done" not in body
     assert "event: done" in body
 
 

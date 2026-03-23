@@ -45,8 +45,6 @@ class ConversationMessage(Base):
     )
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
-    content_blocks: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
-    reasoning_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     trace_steps: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
     sequence: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

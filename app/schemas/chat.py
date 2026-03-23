@@ -9,7 +9,6 @@ class ChatMessage(BaseModel):
 
     role: Literal["system", "user", "assistant"]
     content: str = Field(min_length=1)
-    content_blocks: list[dict[str, object]] | None = None
 
 
 class ChatRequest(BaseModel):

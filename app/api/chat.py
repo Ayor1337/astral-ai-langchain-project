@@ -38,12 +38,8 @@ async def _resolve_stream(request: ChatRequest) -> AsyncIterator[tuple[str, dict
         "为兼容旧调用，不传 conversation_id 时仍会在首条消息到达时隐式创建会话。"
         "首个 conversation 事件会返回 run_id，前端可用该 run_id 调用 POST /api/chat/runs/{run_id}/stop 请求终止当前生成。"
         "请求体支持通过 thinking_enabled 控制返回模式："
-        "当 thinking_enabled=true 时跳过路由，直接进入复杂执行；原始 thinking 会被整理为逐步追加的 thought_step，"
-        "工具轨迹继续通过 trace_step 返回；"
-        "当 thinking_enabled=false 时先做 simple/complex/agent 路由，再继续生成回答；"
-        "其中 simple 路径只返回 chunk，complex/agent 路径会额外返回 route/planner_done 与链式 trace_step。"
-        "首轮会话标题会在后台异步生成并落库，不会阻塞当前 SSE 收尾；前端应通过后续会话列表或详情刷新读取最新标题。"
-        "链式执行轨迹统一通过 thought_step、trace_step 与 trace_done 返回。"
+        "当 thinking_enabled=true 时，模型的思考、工具调用和搜索等非文本过程都会统一通过 trace_step 返回；"
+        "当 thinking_enabled=false 时，只返回正文 chunk。"
     ),
     responses={
         200: {"description": "SSE 流式响应"},

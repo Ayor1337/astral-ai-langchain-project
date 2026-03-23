@@ -21,9 +21,6 @@ class ModelEndpointSettings:
 @dataclass(frozen=True)
 class Settings:
     chat_endpoint: ModelEndpointSettings
-    title_agent_endpoint: ModelEndpointSettings
-    reasoning_agent_endpoint: ModelEndpointSettings
-    planner_agent_endpoint: ModelEndpointSettings
     database_url: str
     memory_window_size: int
     memory_summary_trigger: int
@@ -109,9 +106,6 @@ def _validate_endpoint_settings(prefix: str, endpoint: ModelEndpointSettings) ->
 
 def validate_settings(settings: Settings) -> Settings:
     chat_endpoint = _validate_endpoint_settings("LLM", settings.chat_endpoint)
-    title_agent_endpoint = _validate_endpoint_settings("TITLE_AGENT", settings.title_agent_endpoint)
-    reasoning_agent_endpoint = _validate_endpoint_settings("REASONING_AGENT", settings.reasoning_agent_endpoint)
-    planner_agent_endpoint = _validate_endpoint_settings("PLANNER_AGENT", settings.planner_agent_endpoint)
 
     if settings.database_url and not settings.database_url.startswith(
         ("postgresql://", "postgresql+asyncpg://")
@@ -130,9 +124,6 @@ def validate_settings(settings: Settings) -> Settings:
 
     return Settings(
         chat_endpoint=chat_endpoint,
-        title_agent_endpoint=title_agent_endpoint,
-        reasoning_agent_endpoint=reasoning_agent_endpoint,
-        planner_agent_endpoint=planner_agent_endpoint,
         database_url=settings.database_url,
         memory_window_size=settings.memory_window_size,
         memory_summary_trigger=settings.memory_summary_trigger,
@@ -144,9 +135,6 @@ def get_settings() -> Settings:
     chat_endpoint = _build_endpoint_settings("LLM")
     settings = Settings(
         chat_endpoint=chat_endpoint,
-        title_agent_endpoint=_build_endpoint_settings("TITLE_AGENT", chat_endpoint),
-        reasoning_agent_endpoint=_build_endpoint_settings("REASONING_AGENT", chat_endpoint),
-        planner_agent_endpoint=_build_endpoint_settings("PLANNER_AGENT", chat_endpoint),
         database_url=_get_setting_value("DATABASE_URL"),
         memory_window_size=_get_int_setting("MEMORY_WINDOW_SIZE", 8),
         memory_summary_trigger=_get_int_setting("MEMORY_SUMMARY_TRIGGER", 12),

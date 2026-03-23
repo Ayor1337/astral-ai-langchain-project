@@ -69,8 +69,6 @@ class ConversationRepository:
         *,
         role: str,
         content: str,
-        content_blocks: list[dict[str, object]] | None = None,
-        reasoning_summary: str | None = None,
         trace_steps: list[dict[str, object]] | None = None,
     ) -> ConversationMessage:
         current_max = await self.session.scalar(
@@ -82,8 +80,6 @@ class ConversationRepository:
             conversation_id=conversation.id,
             role=role,
             content=content,
-            content_blocks=content_blocks,
-            reasoning_summary=reasoning_summary,
             trace_steps=trace_steps,
             sequence=int(current_max or 0) + 1,
         )
@@ -92,14 +88,12 @@ class ConversationRepository:
         await self.session.flush()
         return message
 
-    async def update_message_reasoning(
+    async def update_message_trace(
         self,
         message: ConversationMessage,
         *,
-        reasoning_summary: str | None,
         trace_steps: list[dict[str, object]] | None,
     ) -> ConversationMessage:
-        message.reasoning_summary = reasoning_summary
         message.trace_steps = trace_steps
         await self.session.flush()
         return message

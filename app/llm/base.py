@@ -63,17 +63,11 @@ def extract_text_content(content: object) -> str:
 
 
 def _to_langchain_message(message: ChatMessage) -> SystemMessage | HumanMessage | AIMessage:
-    content: str | list[ContentBlock]
-    if message.role == "assistant" and message.content_blocks:
-        content = message.content_blocks
-    else:
-        content = message.content
-
     if message.role == "system":
-        return SystemMessage(content=content)
+        return SystemMessage(content=message.content)
     if message.role == "assistant":
-        return AIMessage(content=content)
-    return HumanMessage(content=content)
+        return AIMessage(content=message.content)
+    return HumanMessage(content=message.content)
 
 
 def create_chat_model(

@@ -23,7 +23,6 @@ def _to_message_view(message: ConversationMessage) -> ConversationMessageView:
     return ConversationMessageView(
         role=message.role,
         content=message.content,
-        reasoning_summary=message.reasoning_summary,
         trace_steps=message.trace_steps,
         sequence=message.sequence,
         created_at=message.created_at,
