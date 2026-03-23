@@ -3,6 +3,7 @@ fastapi
 httpx
 langchain
 langchain-anthropic
+langchain-openai
 pydantic
 pytest
 sqlalchemy

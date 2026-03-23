@@ -80,7 +80,6 @@ def test_get_conversation_detail_returns_messages(monkeypatch):
                     role="user",
                     content="你好",
                     sequence=1,
-                    reasoning_summary=None,
                     trace_steps=None,
                     created_at="2026-03-17T00:00:00Z",
                 )
@@ -94,8 +93,8 @@ def test_get_conversation_detail_returns_messages(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["messages"][0]["content"] == "你好"
-    assert response.json()["messages"][0]["reasoning_summary"] is None
     assert response.json()["messages"][0]["trace_steps"] is None
+    assert "content_blocks" not in response.json()["messages"][0]
 
 
 def test_update_conversation_title_returns_updated_resource(monkeypatch):

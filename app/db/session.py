@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import ConfigurationError, _get_setting_value
@@ -39,6 +40,12 @@ async def init_db() -> None:
     engine = get_engine()
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await connection.execute(
+            text("ALTER TABLE conversation_messages DROP COLUMN IF EXISTS reasoning_summary")
+        )
+        await connection.execute(
+            text("ALTER TABLE conversation_messages DROP COLUMN IF EXISTS content_blocks")
+        )
 
 
 async def close_db() -> None:

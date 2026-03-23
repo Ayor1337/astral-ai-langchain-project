@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-TraceStepType = Literal["thought", "search", "fetch", "tool_call", "tool_result", "retry", "other"]
+TraceStepType = Literal["thinking", "search", "fetch", "tool_call", "tool_result", "retry", "other"]
 TraceStepStatus = Literal["pending", "running", "success", "error", "skipped"]
 
 
@@ -10,6 +10,9 @@ class TraceStep(TypedDict, total=False):
     step_id: str
     parent_step_id: str
     type: TraceStepType
+    thinking: str
+    signature: str
+    index: int
     kind: str
     status: TraceStepStatus
     title: str

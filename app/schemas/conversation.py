@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 class ConversationMessageView(BaseModel):
     role: Literal["user", "assistant"]
     content: str
-    reasoning_summary: str | None = None
     trace_steps: list[dict[str, object]] | None = None
     sequence: int
     created_at: datetime
