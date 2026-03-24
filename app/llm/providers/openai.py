@@ -14,6 +14,7 @@ class OpenAIProvider:
         endpoint: ModelEndpointSettings,
         thinking_enabled: bool = False,
     ) -> None:
+        """OpenAI 兼容实现当前不支持 thinking，提早在入口处拒绝。"""
         if thinking_enabled:
             raise ThinkingNotSupportedError("provider openai does not support thinking")
 
@@ -24,6 +25,7 @@ class OpenAIProvider:
         streaming: bool,
         thinking_enabled: bool = False,
     ) -> ChatOpenAI:
+        """构造 LangChain OpenAI 聊天模型实例。"""
         self.validate_chat_capabilities(
             endpoint=endpoint,
             thinking_enabled=thinking_enabled,

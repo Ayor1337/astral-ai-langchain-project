@@ -9,6 +9,7 @@ from sqlalchemy.types import Uuid
 
 
 def utcnow() -> datetime:
+    """统一生成带时区的 UTC 时间，避免混入本地时区时间。"""
     return datetime.now(timezone.utc)
 
 
@@ -17,6 +18,7 @@ class Base(DeclarativeBase):
 
 
 class Conversation(Base):
+    """会话主表，保存元数据和滚动摘要。"""
     __tablename__ = "conversations"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -35,6 +37,7 @@ class Conversation(Base):
 
 
 class ConversationMessage(Base):
+    """会话消息表，按 sequence 维护单会话内的稳定顺序。"""
     __tablename__ = "conversation_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

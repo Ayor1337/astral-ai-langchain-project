@@ -25,6 +25,7 @@ TRACE_STEP_STATUSES = {"pending", "running", "success", "error", "skipped"}
 
 
 def _utcnow_iso() -> str:
+    """为 trace 事件统一生成 ISO 格式 UTC 时间戳。"""
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -32,6 +33,7 @@ def _merge_trace_step(
     trace_state: dict[str, TraceStep],
     step_update: TraceStep,
 ) -> TraceStep:
+    """按 step_id 合并增量 trace，保留流式更新的最后状态。"""
     step_id = str(step_update.get("step_id", ""))
     if not step_id:
         return step_update
@@ -42,6 +44,7 @@ def _merge_trace_step(
 
 
 def _coerce_stream_block(chunk: object) -> dict[str, object] | None:
+    """兼容字符串块和结构化块，统一为字典格式继续处理。"""
     if isinstance(chunk, str):
         if not chunk:
             return None
@@ -52,12 +55,14 @@ def _coerce_stream_block(chunk: object) -> dict[str, object] | None:
 
 
 def _normalize_trace_status(raw_status: object) -> str:
+    """将未知状态收敛为 running，避免前端收到不稳定枚举。"""
     if isinstance(raw_status, str) and raw_status in TRACE_STEP_STATUSES:
         return raw_status
     return "running"
 
 
 def _resolve_trace_step_id(block: dict[str, object], *, step_type: str, fallback_order: int) -> str:
+    """尽量复用上游 step_id；缺失时按类型和顺序生成稳定降级 ID。"""
     raw_step_id = block.get("step_id")
     if raw_step_id:
         return str(raw_step_id).strip()
@@ -71,6 +76,7 @@ def _build_trace_step_from_block(
     *,
     fallback_order: int,
 ) -> TraceStep:
+    """把 provider 返回的块标准化为统一 trace_step 结构。"""
     raw_type = block.get("type")
     step_type = str(raw_type) if isinstance(raw_type, str) else "other"
     if step_type not in TRACE_BLOCK_TYPES:
@@ -125,6 +131,7 @@ def _serialize_trace_steps(
     *,
     finalize_running: bool,
 ) -> list[TraceStep] | None:
+    """在落库前按顺序序列化 trace，并可将残留 running 步骤收口为 success。"""
     if not trace_state:
         return None
 
@@ -149,6 +156,7 @@ def _finalize_thinking_step(
     trace_state: dict[str, TraceStep],
     active_thinking_step_id: str | None,
 ) -> TraceStep | None:
+    """在文本输出开始或结束时关闭当前 thinking 步骤，避免悬挂状态。"""
     if not active_thinking_step_id:
         return None
     current_step = trace_state.get(active_thinking_step_id)
@@ -164,6 +172,7 @@ def _finalize_thinking_step(
 
 
 async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
+    """协调会话读写、模型流式输出、停止控制和最终持久化。"""
     settings = get_settings()
     session_factory = get_session_factory()
     use_trace = request.thinking_enabled
@@ -177,6 +186,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
     async with session_factory() as session:
         repository = ConversationRepository(session)
         if request.conversation_id is None:
+            # 兼容旧调用路径：未显式建会话时，首轮消息到来时隐式创建。
             conversation = await repository.create_conversation(title=DEFAULT_CONVERSATION_TITLE)
         else:
             conversation = await repository.get_conversation(request.conversation_id)
@@ -238,10 +248,12 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
             active_thinking_step_id: str | None = None
 
             def _trace_event(step_update: TraceStep) -> ChatEvent:
+                """把增量更新合并到当前 trace 状态后再返回给前端。"""
                 merged = _merge_trace_step(trace_state, step_update)
                 return ("trace_step", merged)
 
             async def _close_stream() -> None:
+                """确保底层模型流只被关闭一次，避免 finally 中重复报错。"""
                 nonlocal stream_closed
                 if stream_closed:
                     return
@@ -252,6 +264,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                         await close_stream()
 
             async def _next_chunk_or_stop() -> object | None:
+                """在下一块输出和停止信号之间竞速，优先响应停止请求。"""
                 nonlocal stopped
                 if run_handle.stop_event.is_set():
                     return None
@@ -292,6 +305,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                     block_type = block.get("type")
                     if block_type == "text":
                         if use_trace:
+                            # 文本开始输出后，前一个 thinking 步骤应当立即收口。
                             finalized_thinking = _finalize_thinking_step(trace_state, active_thinking_step_id)
                             if finalized_thinking is not None:
                                 active_thinking_step_id = None
@@ -315,6 +329,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                             if isinstance(existing_order, int):
                                 trace_payload["order"] = existing_order
                         elif "order" not in block:
+                            # 未显式提供顺序时，按首次出现顺序递增，保持前端展示稳定。
                             trace_order += 1
                         else:
                             trace_order = max(trace_order, int(trace_payload.get("order", trace_order)) + 1)
@@ -340,6 +355,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                         if current_conversation is None:
                             raise ConversationNotFoundError("conversation not found")
                         if assistant_content:
+                            # 只有确实产出正文时才落 assistant 消息，避免空消息污染历史。
                             assistant_message = await repository.add_message(
                                 current_conversation,
                                 role="assistant",

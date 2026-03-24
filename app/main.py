@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """在应用启动和关闭时管理数据库连接生命周期。"""
     try:
+        # 缺少数据库配置时允许 API 继续启动，便于仅调试不依赖持久化的场景。
         await init_db()
     except ConfigurationError:
         logger.warning("Skipping database initialization because DATABASE_URL is not configured")
@@ -42,4 +44,5 @@ app.include_router(conversations_router)
 
 @app.get("/")
 async def root():
+    """提供最小健康检查入口。"""
     return {"message": "AstralAI is running"}

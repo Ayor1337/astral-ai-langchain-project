@@ -28,6 +28,7 @@ class Settings:
 
 
 def _load_dotenv_values() -> dict[str, str]:
+    """从当前工作目录读取 .env，作为进程环境变量的回退来源。"""
     env_path = Path.cwd() / ".env"
     if not env_path.exists():
         return {}
@@ -45,6 +46,7 @@ def _load_dotenv_values() -> dict[str, str]:
 
 
 def _get_setting_value(name: str, default: str = "") -> str:
+    """优先读取进程环境变量，其次读取 .env，最后回退到默认值。"""
     env_value = os.getenv(name)
     if env_value is not None:
         return env_value.strip()
@@ -57,6 +59,7 @@ def _get_setting_value(name: str, default: str = "") -> str:
 
 
 def _get_int_setting(name: str, default: int) -> int:
+    """将字符串配置转换为整数，并在格式错误时抛出稳定的配置异常。"""
     raw_value = _get_setting_value(name, str(default))
     try:
         return int(raw_value)
@@ -65,6 +68,7 @@ def _get_int_setting(name: str, default: int) -> int:
 
 
 def _build_endpoint_settings(prefix: str, fallback: ModelEndpointSettings | None = None) -> ModelEndpointSettings:
+    """按前缀组装端点配置，并在需要时继承回退端点的缺省值。"""
     provider = _get_setting_value(f"{prefix}_PROVIDER") or (fallback.provider if fallback else "")
     api_key = _get_setting_value(f"{prefix}_API_KEY") or (fallback.api_key if fallback else "")
     raw_base_url = _get_setting_value(f"{prefix}_BASE_URL")
@@ -79,6 +83,7 @@ def _build_endpoint_settings(prefix: str, fallback: ModelEndpointSettings | None
 
 
 def _build_optional_endpoint_settings(prefix: str) -> ModelEndpointSettings | None:
+    """仅当对应前缀至少配置了一个字段时，才视为启用可选端点。"""
     raw_values = {
         "provider": _get_setting_value(f"{prefix}_PROVIDER"),
         "api_key": _get_setting_value(f"{prefix}_API_KEY"),
@@ -96,6 +101,7 @@ def _build_optional_endpoint_settings(prefix: str) -> ModelEndpointSettings | No
 
 
 def _validate_endpoint_settings(prefix: str, endpoint: ModelEndpointSettings) -> ModelEndpointSettings:
+    """归一化端点配置，并提前拒绝 provider、模型和 URL 的无效组合。"""
     provider = endpoint.provider.strip().lower()
     if provider not in SUPPORTED_PROVIDERS:
         raise ConfigurationError(
@@ -123,6 +129,7 @@ def _validate_endpoint_settings(prefix: str, endpoint: ModelEndpointSettings) ->
 
 
 def validate_settings(settings: Settings) -> Settings:
+    """对完整配置做跨字段校验，保证运行期读取到的是稳定配置对象。"""
     chat_endpoint = _validate_endpoint_settings("LLM", settings.chat_endpoint)
     title_agent_endpoint = (
         _validate_endpoint_settings("TITLE_AGENT", settings.title_agent_endpoint)
@@ -156,6 +163,7 @@ def validate_settings(settings: Settings) -> Settings:
 
 @lru_cache
 def get_settings() -> Settings:
+    """缓存配置对象，避免每次请求都重复解析环境变量。"""
     chat_endpoint = _build_endpoint_settings("LLM")
     settings = Settings(
         chat_endpoint=chat_endpoint,

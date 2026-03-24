@@ -28,6 +28,7 @@ router = APIRouter(prefix="/api/conversations", tags=["conversations"])
     },
 )
 async def create_conversation_route() -> ConversationListItem:
+    """显式创建空会话，便于前端先拿到稳定的 conversation_id。"""
     try:
         return await create_conversation()
     except ConfigurationError as exc:
@@ -41,6 +42,7 @@ async def create_conversation_route() -> ConversationListItem:
     description="返回所有未软删除的会话，按 updated_at 倒序排列。",
 )
 async def list_conversations_route() -> list[ConversationListItem]:
+    """返回所有未删除会话，具体排序由服务层和仓储层统一维护。"""
     try:
         return await list_conversations()
     except ConfigurationError as exc:
@@ -54,6 +56,7 @@ async def list_conversations_route() -> list[ConversationListItem]:
     description="返回单个会话的元数据、摘要和完整消息历史。新建空会话时 messages 为空数组。",
 )
 async def get_conversation_detail_route(conversation_id: UUID) -> ConversationDetail:
+    """加载单个会话及其完整消息历史。"""
     try:
         return await get_conversation_detail(conversation_id)
     except ConfigurationError as exc:
@@ -72,6 +75,7 @@ async def update_conversation_route(
     conversation_id: UUID,
     request: ConversationUpdateRequest,
 ) -> ConversationListItem:
+    """只更新会话标题，不触碰摘要和消息。"""
     try:
         return await update_conversation_title(conversation_id, request.title)
     except ConfigurationError as exc:
@@ -87,6 +91,7 @@ async def update_conversation_route(
     description="将会话标记为已删除。删除后的会话不会出现在列表中，详情与聊天访问将返回 404。",
 )
 async def delete_conversation_route(conversation_id: UUID) -> Response:
+    """执行软删除，让列表和详情接口统一感知会话已不可见。"""
     try:
         await delete_conversation(conversation_id)
     except ConfigurationError as exc:

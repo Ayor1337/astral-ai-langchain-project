@@ -18,11 +18,13 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
 def _format_sse(event: str, payload: dict[str, Any]) -> str:
+    """将事件序列化为前端可直接消费的 SSE 文本格式。"""
     data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     return f"event: {event}\ndata: {data}\n\n"
 
 
 async def _resolve_stream(request: ChatRequest) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    """兼容同步返回迭代器和异步返回迭代器的服务层实现。"""
     stream_or_iterator = stream_chat_events(request)
     if inspect.isawaitable(stream_or_iterator):
         return await stream_or_iterator
@@ -51,6 +53,7 @@ async def _resolve_stream(request: ChatRequest) -> AsyncIterator[tuple[str, dict
 )
 async def stream_chat(request: ChatRequest) -> StreamingResponse:
     try:
+        # 先拉取首个事件，确保在真正建立 SSE 响应前就能把配置/会话类错误转成 HTTP 状态码。
         stream = await _resolve_stream(request)
         first_event = await anext(stream)
     except ConfigurationError as exc:
@@ -85,6 +88,7 @@ async def stream_chat(request: ChatRequest) -> StreamingResponse:
     },
 )
 async def stop_chat_run(run_id: UUID) -> ChatRunStopResponse:
+    """按运行句柄请求停止，具体终止由流式循环自行感知并收尾。"""
     try:
         payload = await request_stop_chat_run(run_id)
     except ChatRunNotFoundError as exc:

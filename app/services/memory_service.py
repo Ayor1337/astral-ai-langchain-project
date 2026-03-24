@@ -14,6 +14,7 @@ def build_context_messages(
     recent_messages: Sequence[ChatMessage],
     current_message: str,
 ) -> list[ChatMessage]:
+    """拼装发送给模型的上下文，顺序固定为系统提示、摘要、历史消息、当前输入。"""
     messages: list[ChatMessage] = []
     if system_prompt:
         messages.append(ChatMessage(role="system", content=system_prompt))
@@ -30,6 +31,7 @@ def build_context_messages(
 
 
 def should_refresh_summary(*, total_messages: int, trigger: int) -> bool:
+    """当消息总量超过阈值时触发摘要刷新。"""
     return total_messages > trigger
 
 
@@ -37,6 +39,7 @@ async def refresh_summary_if_needed(
     repository: ConversationRepository,
     conversation: Conversation,
 ) -> None:
+    """仅汇总已滑出上下文窗口的消息，避免摘要与当前短期记忆重复。"""
     settings = get_settings()
     total_messages = await repository.count_messages(conversation.id)
     if not should_refresh_summary(
@@ -46,6 +49,7 @@ async def refresh_summary_if_needed(
         return
 
     cutoff_sequence = total_messages - settings.memory_window_size
+    # 只处理尚未进入摘要且已经不再参与上下文窗口的消息区间。
     messages_to_summarize = await repository.list_messages_for_summary(
         conversation.id,
         from_sequence_exclusive=conversation.summary_message_count,

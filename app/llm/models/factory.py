@@ -8,6 +8,7 @@ def create_chat_model(
     streaming: bool,
     thinking_enabled: bool = False,
 ):
+    """按 provider 分发到底层模型工厂，隐藏实现差异。"""
     provider = get_provider(endpoint.provider)
     return provider.create_chat_model(
         endpoint=endpoint,

@@ -19,6 +19,7 @@ def create_chat_agent(
     endpoint: ModelEndpointSettings,
     thinking_enabled: bool = False,
 ):
+    """创建带工具能力的聊天 agent。"""
     validate_chat_capabilities(endpoint=endpoint, thinking_enabled=thinking_enabled)
     model = create_chat_model(
         endpoint=endpoint,
@@ -37,6 +38,7 @@ def validate_chat_capabilities(
     endpoint: ModelEndpointSettings,
     thinking_enabled: bool = False,
 ) -> None:
+    """在真正创建模型前校验 provider 是否支持请求能力。"""
     if not thinking_enabled:
         return
     provider = get_provider(endpoint.provider)
@@ -47,18 +49,22 @@ def validate_chat_capabilities(
 
 
 def _compact_json(value: object) -> str:
+    """输出紧凑 JSON，便于 trace 在网络中传输和前端展示。"""
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def _tool_result_json(content: object) -> str:
+    """工具结果如果已是字符串则原样返回，否则序列化为 JSON。"""
     if isinstance(content, str):
         return content
     return _compact_json(content)
 
 
 def _iter_message_blocks(message: object) -> list[ContentBlock]:
+    """从 LangChain 消息中提取统一内容块。"""
     blocks: list[ContentBlock] = []
     if isinstance(message, AIMessage):
+        # tool_calls 不在 message.content 中，需要单独转成 trace 块。
         for tool_call in message.tool_calls:
             tool_name = tool_call.get("name")
             if not isinstance(tool_name, str) or not tool_name:
@@ -90,6 +96,7 @@ def _iter_message_blocks(message: object) -> list[ContentBlock]:
 
 
 def _iter_update_blocks(update: dict[str, Any]) -> list[ContentBlock]:
+    """把 LangChain updates 事件拍平成 AstralAI 自己的块序列。"""
     blocks: list[ContentBlock] = []
     for payload in update.values():
         if not isinstance(payload, dict):
@@ -107,6 +114,7 @@ async def build_chat_stream(
     *,
     thinking_enabled: bool = False,
 ) -> AsyncIterator[ContentBlock | str]:
+    """构建聊天流，并把底层异常统一转换成上游服务异常。"""
     endpoint = get_settings().chat_endpoint
     agent = create_chat_agent(
         endpoint=endpoint,
@@ -127,6 +135,7 @@ async def build_chat_stream(
                         if isinstance(text, str) and text:
                             yield block
                     elif block_type == "thinking":
+                        # thinking 只在包含可展示内容时向上游透传。
                         thinking = block.get("thinking")
                         signature = block.get("signature")
                         if thinking or signature:

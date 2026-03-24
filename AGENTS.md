@@ -31,7 +31,7 @@ pytest tests/test_chat_api.py
 ```
 
 ## Coding Style & Naming Conventions
-Follow PEP 8 with 4-space indentation and explicit imports. Use `snake_case` for functions, modules, and variables; use `PascalCase` for classes such as `Settings` and schema types. Keep route handlers thin and move provider-specific logic into `app/llm/`. Prefer small, pure helpers over defensive abstraction layers; this repository is intentionally simple.
+Follow PEP 8 with 4-space indentation and explicit imports. Use `snake_case` for functions, modules, and variables; use `PascalCase` for classes such as `Settings` and schema types. Generated code must include concise comments that explain the intent of key logic, especially for non-obvious branches or flows. Keep route handlers thin and move provider-specific logic into `app/llm/`. Prefer small, pure helpers over defensive abstraction layers; this repository is intentionally simple.
 
 ## Testing Guidelines
 Add tests beside the existing `tests/test_*.py` files. Name new tests `test_<behavior>()` and cover both success and failure paths, especially for streaming responses and configuration validation. Use `pytest` fixtures and `monkeypatch` for HTTP-layer tests; lightweight `unittest` cases are acceptable when they match the existing file. Before opening a PR, ensure `pytest` passes locally.
