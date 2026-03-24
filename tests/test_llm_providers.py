@@ -3,7 +3,9 @@ from unittest.mock import patch
 import pytest
 
 from app.core.config import ModelEndpointSettings
-from app.llm.base import ThinkingNotSupportedError, create_chat_model
+from app.llm.agents.chat import validate_chat_capabilities
+from app.llm.exceptions import ThinkingNotSupportedError
+from app.llm.models.factory import create_chat_model
 from app.llm.providers import get_provider
 
 
@@ -55,3 +57,15 @@ def test_create_chat_model_rejects_thinking_for_openai():
 
     with pytest.raises(ThinkingNotSupportedError, match="provider openai does not support thinking"):
         create_chat_model(endpoint=endpoint, streaming=True, thinking_enabled=True)
+
+
+def test_validate_chat_capabilities_rejects_thinking_for_openai():
+    endpoint = ModelEndpointSettings(
+        provider="openai",
+        api_key="test-key",
+        base_url=None,
+        model="gpt-4o-mini",
+    )
+
+    with pytest.raises(ThinkingNotSupportedError, match="provider openai does not support thinking"):
+        validate_chat_capabilities(endpoint=endpoint, thinking_enabled=True)

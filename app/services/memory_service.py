@@ -2,7 +2,7 @@ from collections.abc import Sequence
 
 from app.core.config import get_settings
 from app.db.models import Conversation
-from app.llm.base import generate_summary
+from app.llm.agents.summary import generate_summary
 from app.repositories.conversations import ConversationRepository
 from app.schemas.chat import ChatMessage
 

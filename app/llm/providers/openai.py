@@ -8,6 +8,15 @@ class OpenAIProvider:
     name = "openai"
     supports_thinking = False
 
+    def validate_chat_capabilities(
+        self,
+        *,
+        endpoint: ModelEndpointSettings,
+        thinking_enabled: bool = False,
+    ) -> None:
+        if thinking_enabled:
+            raise ThinkingNotSupportedError("provider openai does not support thinking")
+
     def create_chat_model(
         self,
         *,
@@ -15,8 +24,10 @@ class OpenAIProvider:
         streaming: bool,
         thinking_enabled: bool = False,
     ) -> ChatOpenAI:
-        if thinking_enabled:
-            raise ThinkingNotSupportedError("provider openai does not support thinking")
+        self.validate_chat_capabilities(
+            endpoint=endpoint,
+            thinking_enabled=thinking_enabled,
+        )
 
         return ChatOpenAI(
             api_key=endpoint.api_key,
