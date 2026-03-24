@@ -40,6 +40,18 @@ def _merge_trace_step(
         return step_update
     merged = dict(trace_state.get(step_id, {}))
     merged.update(step_update)
+    if merged.get("type") == "thinking":
+        previous_thinking = trace_state.get(step_id, {}).get("thinking")
+        current_thinking = step_update.get("thinking")
+        if isinstance(previous_thinking, str) and isinstance(current_thinking, str):
+            if current_thinking == previous_thinking:
+                merged["thinking"] = previous_thinking
+            elif current_thinking.startswith(previous_thinking):
+                merged["thinking"] = current_thinking
+            elif previous_thinking.endswith(current_thinking):
+                merged["thinking"] = previous_thinking
+            else:
+                merged["thinking"] = previous_thinking + current_thinking
     trace_state[step_id] = merged
     return merged
 
