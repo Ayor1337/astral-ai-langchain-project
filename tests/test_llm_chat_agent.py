@@ -62,12 +62,40 @@ class ChatAgentStreamTests(unittest.IsolatedAsyncioTestCase):
     async def test_build_chat_stream_uses_messages_for_text_and_updates_for_trace(self):
         agent = FakeAgent(
             [
+                (
+                    "messages",
+                    (
+                        AIMessageChunk(
+                            content=[
+                                {
+                                    "type": "thinking",
+                                    "thinking": "先分析用户问题。",
+                                    "signature": "sig-1",
+                                    "index": 0,
+                                }
+                            ]
+                        ),
+                        {"langgraph_node": "model"},
+                    ),
+                ),
                 ("messages", (AIMessageChunk(content="Hel"), {"langgraph_node": "model"})),
                 (
                     "updates",
                     {
                         "model": {
-                            "messages": [AIMessage(content="Hello")],
+                            "messages": [
+                                AIMessage(
+                                    content=[
+                                        {
+                                            "type": "thinking",
+                                            "thinking": "不应重复的 thinking",
+                                            "signature": "sig-1",
+                                            "index": 0,
+                                        },
+                                        {"type": "text", "text": "Hello", "index": 0},
+                                    ]
+                                )
+                            ],
                         }
                     },
                 ),
@@ -97,6 +125,12 @@ class ChatAgentStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             blocks,
             [
+                {
+                    "type": "thinking",
+                    "thinking": "先分析用户问题。",
+                    "signature": "sig-1",
+                    "index": 0,
+                },
                 {"type": "text", "text": "Hel", "index": 0},
                 {
                     "type": "tool_result",
