@@ -15,6 +15,14 @@ class AnthropicProvider:
     name = "anthropic"
     supports_thinking = True
 
+    def validate_chat_capabilities(
+        self,
+        *,
+        endpoint: ModelEndpointSettings,
+        thinking_enabled: bool = False,
+    ) -> None:
+        return None
+
     def create_chat_model(
         self,
         *,

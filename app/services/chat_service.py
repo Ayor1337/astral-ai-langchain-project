@@ -7,7 +7,8 @@ from typing import Any, TypeAlias
 
 from app.core.config import get_settings
 from app.db.session import get_session_factory
-from app.llm.base import UpstreamServiceError, build_chat_stream, validate_chat_capabilities
+from app.llm.agents.chat import build_chat_stream, validate_chat_capabilities
+from app.llm.exceptions import UpstreamServiceError
 from app.repositories.conversations import ConversationRepository
 from app.schemas.chat import ChatMessage, ChatRequest
 from app.schemas.trace import TraceStep
