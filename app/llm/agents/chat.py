@@ -97,6 +97,8 @@ def _iter_message_blocks(message: object) -> list[ContentBlock]:
 
 def _iter_update_blocks(update: dict[str, Any]) -> list[ContentBlock]:
     """把 LangChain updates 事件拍平成 AstralAI 自己的块序列。"""
+    if not isinstance(update, dict):
+        return []
     blocks: list[ContentBlock] = []
     for payload in update.values():
         if not isinstance(payload, dict):
@@ -106,6 +108,23 @@ def _iter_update_blocks(update: dict[str, Any]) -> list[ContentBlock]:
             continue
         for message in messages:
             blocks.extend(_iter_message_blocks(message))
+    return blocks
+
+
+def _iter_message_stream_blocks(payload: object) -> list[ContentBlock]:
+    """从 messages 流模式里只提取正文文本增量。"""
+    message = payload
+    if isinstance(payload, tuple) and len(payload) == 2:
+        message = payload[0]
+
+    content = getattr(message, "content", message)
+    blocks: list[ContentBlock] = []
+    for block in normalize_content_blocks(content):
+        if block.get("type") != "text":
+            continue
+        text = block.get("text")
+        if isinstance(text, str) and text:
+            blocks.append(block)
     return blocks
 
 
@@ -121,27 +140,42 @@ async def build_chat_stream(
         thinking_enabled=thinking_enabled,
     )
     langchain_messages = to_langchain_messages(messages)
+    stream_mode: str | list[str] = ["messages", "updates"] if thinking_enabled else "messages"
 
     async def iterator() -> AsyncIterator[ContentBlock | str]:
         try:
-            async for update in agent.astream(
+            async for event in agent.astream(
                 {"messages": langchain_messages},
-                stream_mode="updates",
+                stream_mode=stream_mode,
             ):
-                for block in _iter_update_blocks(update):
+                if thinking_enabled:
+                    if not (isinstance(event, tuple) and len(event) == 2 and isinstance(event[0], str)):
+                        continue
+                    mode, payload = event
+                else:
+                    mode, payload = "messages", event
+
+                if mode == "messages":
+                    for block in _iter_message_stream_blocks(payload):
+                        yield block
+                    continue
+
+                if mode != "updates":
+                    continue
+
+                for block in _iter_update_blocks(payload):
                     block_type = block.get("type")
                     if block_type == "text":
-                        text = block.get("text")
-                        if isinstance(text, str) and text:
-                            yield block
-                    elif block_type == "thinking":
+                        # 正文文本只认 messages 流，避免节点级 updates 把整段答案重复发出。
+                        continue
+                    if block_type == "thinking":
                         # thinking 只在包含可展示内容时向上游透传。
                         thinking = block.get("thinking")
                         signature = block.get("signature")
                         if thinking or signature:
                             yield block
-                    else:
-                        yield block
+                        continue
+                    yield block
         except Exception as exc:
             raise UpstreamServiceError(str(exc)) from exc
 
