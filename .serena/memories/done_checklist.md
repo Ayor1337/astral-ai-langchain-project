@@ -1,0 +1,1 @@
+完成任务前至少运行相关 pytest；若涉及聊天链路，优先跑 `pytest tests/test_chat_api.py tests/test_chat_service.py`。若新增配置项，需同步更新 `.env.example` 与 `app/core/config.py` 校验。不要提交真实密钥。
