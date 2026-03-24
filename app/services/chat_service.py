@@ -5,9 +5,10 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any, TypeAlias
 
-from app.core.config import get_settings
+from app.core.config import ConfigurationError, get_settings
 from app.db.session import get_session_factory
 from app.llm.agents.chat import build_chat_stream, validate_chat_capabilities
+from app.llm.agents.titile import generate_conversation_title
 from app.llm.exceptions import UpstreamServiceError
 from app.repositories.conversations import ConversationRepository
 from app.schemas.chat import ChatMessage, ChatRequest
@@ -211,6 +212,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
             before_sequence=user_message.sequence,
         )
         await session.commit()
+    should_generate_title = not recent_messages and conversation.title == DEFAULT_CONVERSATION_TITLE
 
     llm_messages = build_context_messages(
         system_prompt=conversation.system_prompt,
@@ -347,6 +349,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
 
                 assistant_content = "".join(assistant_text_chunks)
                 assistant_message_id: int | None = None
+                generated_title: str | None = None
 
                 try:
                     async with session_factory() as session:
@@ -375,6 +378,29 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                     yield ("error", {"detail": "internal server error"})
                     return
 
+                if assistant_content and should_generate_title and not stopped:
+                    try:
+                        generated_title = await generate_conversation_title(
+                            user_message=request.message,
+                            assistant_message=assistant_content,
+                        )
+                    except (ConfigurationError, UpstreamServiceError):
+                        logger.warning("Failed to generate conversation title", exc_info=True)
+
+                if generated_title:
+                    try:
+                        async with session_factory() as session:
+                            repository = ConversationRepository(session)
+                            current_conversation = await repository.get_conversation(conversation.id)
+                            if current_conversation is not None:
+                                await repository.update_title(current_conversation, generated_title)
+                                await session.commit()
+                            else:
+                                generated_title = None
+                    except Exception:
+                        logger.exception("Failed to persist conversation title")
+                        generated_title = None
+
                 if assistant_message_id is not None and use_trace:
                     try:
                         async with session_factory() as session:
@@ -394,6 +420,15 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                         logger.exception("Failed to persist assistant trace")
                         yield ("error", {"detail": "internal server error"})
                         return
+
+                if generated_title:
+                    yield (
+                        "conversation_title",
+                        {
+                            "conversation_id": str(conversation.id),
+                            "title": generated_title,
+                        },
+                    )
 
                 if use_trace:
                     yield ("trace_done", {"status": "stopped" if stopped else "completed"})
