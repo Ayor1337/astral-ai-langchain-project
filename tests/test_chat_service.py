@@ -588,6 +588,46 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(repository.messages), 1)
 
+    async def test_thinking_enabled_after_tool_result_starts_a_new_thinking_step(self):
+        repository = FakeRepository()
+        session_factory = FakeSessionFactory()
+
+        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+            self.assertTrue(thinking_enabled)
+
+            async def iterator():
+                yield {"type": "thinking", "thinking": "先分析用户意图。", "signature": "sig-1", "index": 0}
+                yield {"type": "tool_call", "step_id": "call-1", "tool_name": "add", "input_json": '{"a":1,"b":1}'}
+                yield {"type": "tool_result", "step_id": "call-1", "tool_name": "add", "output_json": '{"result":2}'}
+                yield {"type": "thinking", "thinking": "再根据工具结果组织回复。", "signature": "sig-2", "index": 0}
+                yield {"type": "text", "text": "答案是 2。", "index": 0}
+
+            return iterator()
+
+        with (
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
+            patch("app.services.chat_service.get_session_factory", return_value=session_factory),
+            patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
+            patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
+            patch("app.services.chat_service.generate_conversation_title", new=AsyncMock(return_value="数学")),
+            patch("app.services.chat_service.refresh_summary_if_needed", new=AsyncMock()),
+        ):
+            stream = await stream_chat_events(ChatRequest(message="1+1 等于几？", thinking_enabled=True))
+            events = [event async for event in stream]
+
+        trace_events = [payload for name, payload in events if name == "trace_step"]
+        thinking_steps = [payload for payload in trace_events if payload["type"] == "thinking"]
+        persisted_thinking_steps = [step for step in repository.messages[-1].trace_steps if step["type"] == "thinking"]
+
+        self.assertEqual(
+            [payload["step_id"] for payload in thinking_steps],
+            ["thinking-0", "thinking-0", "thinking-1", "thinking-1"],
+        )
+        self.assertEqual(
+            [payload["thinking"] for payload in persisted_thinking_steps],
+            ["先分析用户意图。", "再根据工具结果组织回复。"],
+        )
+
     async def test_thinking_enabled_stop_before_reply_keeps_only_user_message(self):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()

@@ -84,6 +84,25 @@ def _resolve_trace_step_id(block: dict[str, object], *, step_type: str, fallback
     return f"{step_type}-{fallback_order}"
 
 
+def _ensure_local_thinking_step_id(
+    block: dict[str, object],
+    *,
+    active_thinking_step_id: str | None,
+    next_thinking_step_index: int,
+) -> tuple[dict[str, object], int]:
+    """为没有上游 step_id 的 thinking 块分配本地递增 ID。"""
+    if block.get("type") != "thinking" or block.get("step_id"):
+        return block, next_thinking_step_index
+
+    enriched_block = dict(block)
+    if active_thinking_step_id:
+        enriched_block["step_id"] = active_thinking_step_id
+        return enriched_block, next_thinking_step_index
+
+    enriched_block["step_id"] = f"thinking-{next_thinking_step_index}"
+    return enriched_block, next_thinking_step_index + 1
+
+
 def _build_trace_step_from_block(
     block: dict[str, object],
     *,
@@ -258,6 +277,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
 
             trace_state: dict[str, TraceStep] = {}
             trace_order = 1
+            next_thinking_step_index = 0
             assistant_text_chunks: list[str] = []
             active_thinking_step_id: str | None = None
 
@@ -329,6 +349,11 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                             assistant_text_chunks.append(text)
                             yield ("chunk", {"content": text})
                     elif use_trace:
+                        block, next_thinking_step_index = _ensure_local_thinking_step_id(
+                            block,
+                            active_thinking_step_id=active_thinking_step_id,
+                            next_thinking_step_index=next_thinking_step_index,
+                        )
                         trace_payload = _build_trace_step_from_block(block, fallback_order=trace_order)
                         existing_step = trace_state.get(str(trace_payload.get("step_id", "")))
 
