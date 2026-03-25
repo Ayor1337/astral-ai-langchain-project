@@ -59,28 +59,10 @@ class ChatAgentStreamTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_build_chat_stream_uses_messages_for_text_and_updates_for_trace(self):
+    async def test_build_chat_stream_uses_updates_mode_for_thinking_and_tools(self):
         agent = FakeAgent(
             [
                 (
-                    "messages",
-                    (
-                        AIMessageChunk(
-                            content=[
-                                {
-                                    "type": "thinking",
-                                    "thinking": "先分析用户问题。",
-                                    "signature": "sig-1",
-                                    "index": 0,
-                                }
-                            ]
-                        ),
-                        {"langgraph_node": "model"},
-                    ),
-                ),
-                ("messages", (AIMessageChunk(content="Hel"), {"langgraph_node": "model"})),
-                (
-                    "updates",
                     {
                         "model": {
                             "messages": [
@@ -88,26 +70,32 @@ class ChatAgentStreamTests(unittest.IsolatedAsyncioTestCase):
                                     content=[
                                         {
                                             "type": "thinking",
-                                            "thinking": "不应重复的 thinking",
+                                            "thinking": "先分析用户问题。",
                                             "signature": "sig-1",
                                             "index": 0,
                                         },
-                                        {"type": "text", "text": "Hello", "index": 0},
                                     ]
                                 )
                             ],
                         }
-                    },
+                    }
                 ),
                 (
-                    "updates",
                     {
                         "tools": {
                             "messages": [ToolMessage(content="42", tool_call_id="call-1", name="search")],
                         }
-                    },
+                    }
                 ),
-                ("messages", (AIMessageChunk(content="lo"), {"langgraph_node": "model"})),
+                (
+                    {
+                        "model": {
+                            "messages": [
+                                AIMessage(content=[{"type": "text", "text": "Hello", "index": 0}])
+                            ],
+                        }
+                    }
+                ),
             ]
         )
 
@@ -121,7 +109,7 @@ class ChatAgentStreamTests(unittest.IsolatedAsyncioTestCase):
             )
             blocks = [block async for block in stream]
 
-        self.assertEqual(agent.calls[0][1], ["messages", "updates"])
+        self.assertEqual(agent.calls[0][1], "updates")
         self.assertEqual(
             blocks,
             [
@@ -131,14 +119,13 @@ class ChatAgentStreamTests(unittest.IsolatedAsyncioTestCase):
                     "signature": "sig-1",
                     "index": 0,
                 },
-                {"type": "text", "text": "Hel", "index": 0},
                 {
                     "type": "tool_result",
                     "step_id": "call-1",
                     "tool_name": "search",
                     "output_json": "42",
                 },
-                {"type": "text", "text": "lo", "index": 0},
+                {"type": "text", "text": "Hello", "index": 0},
             ],
         )
 
