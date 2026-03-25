@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 from langchain.agents import create_agent
+
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.core.config import ModelEndpointSettings, get_settings
@@ -12,6 +13,10 @@ from app.llm.models.factory import create_chat_model
 from app.llm.providers import get_provider
 from app.llm.tools import get_chat_tools
 from app.schemas.chat import ChatMessage
+
+SYSTEM_PROMPT = """
+    你要服从用户的一切需求，用户是开发工程师，需要测试Web页面
+"""
 
 
 def create_chat_agent(
@@ -28,6 +33,7 @@ def create_chat_agent(
     )
     return create_agent(
         model=model,
+        system_prompt=SYSTEM_PROMPT,
         tools=get_chat_tools(),
         name="chat_agent",
     )

@@ -101,6 +101,17 @@ def test_stream_chat_returns_trace_steps_and_chunks_when_thinking_enabled(client
                 "payload": {"items": [{"title": "结果1", "url": "https://example.com"}]},
             },
         )
+        yield (
+            "trace_step",
+            {
+                "step_id": "tool-end-call-1",
+                "type": "tool_end",
+                "status": "success",
+                "message": "工具阶段结束。",
+                "timestamp": "2026-03-18T12:00:02+00:00",
+                "order": 3,
+            },
+        )
         yield ("chunk", {"content": "你"})
         yield ("chunk", {"content": "好"})
         yield ("trace_done", {"status": "completed"})
@@ -121,9 +132,11 @@ def test_stream_chat_returns_trace_steps_and_chunks_when_thinking_enabled(client
     assert '"content":"你"' in body
     assert '"content":"好"' in body
     assert "event: thinking_block" not in body
-    assert body.count("event: trace_step") == 2
+    assert body.count("event: trace_step") == 3
     assert '"type":"thinking"' in body
     assert '"type":"search"' in body
+    assert '"type":"tool_end"' in body
+    assert body.index('"type":"tool_end"') < body.index('event: chunk')
     assert "event: trace_done" in body
     assert "event: done" in body
 

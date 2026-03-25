@@ -104,6 +104,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
             next_thinking_step_index = 0
             assistant_text_chunks: list[str] = []
             active_thinking_step_id: str | None = None
+            emitted_tool_end_step_ids: set[str] = set()
             title_event_emitted = False
             pending_chunk_task: asyncio.Task[object] | None = None
 
@@ -111,6 +112,25 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                 """把增量更新合并到当前 trace 状态后再返回给前端。"""
                 merged = merge_trace_step(trace_state, step_update)
                 return ("trace_step", merged)
+
+            def take_tool_end_event(tool_result_step_id: str) -> ChatEvent | None:
+                """在 tool_result 之后补一个明确的 tool_end 节点。"""
+                nonlocal trace_order
+                if not tool_result_step_id or tool_result_step_id in emitted_tool_end_step_ids:
+                    return None
+                emitted_tool_end_step_ids.add(tool_result_step_id)
+                event = trace_event(
+                    {
+                        "step_id": f"tool-end-{tool_result_step_id}",
+                        "parent_step_id": tool_result_step_id,
+                        "type": "tool_end",
+                        "status": "success",
+                        "message": "工具阶段结束。",
+                        "order": trace_order,
+                    }
+                )
+                trace_order += 1
+                return event
 
             def take_ready_title_event() -> ChatEvent | None:
                 """标题一旦就绪就立即向前端发出，不必等正文流结束。"""
@@ -260,6 +280,11 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                             active_thinking_step_id = str(trace_payload.get("step_id", "")) or None
 
                         yield trace_event(trace_payload)
+                        if block_type == "tool_result":
+                            tool_result_step_id = str(trace_payload.get("step_id", ""))
+                            tool_end_event = take_tool_end_event(tool_result_step_id)
+                            if tool_end_event is not None:
+                                yield tool_end_event
 
                 if use_trace and not stopped:
                     finalized_thinking = finalize_thinking_step(trace_state, active_thinking_step_id)

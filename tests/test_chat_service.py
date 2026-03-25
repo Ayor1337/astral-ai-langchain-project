@@ -946,6 +946,100 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             ["先分析用户意图。", "再根据工具结果组织回复。"],
         )
 
+    async def test_thinking_enabled_emits_tool_end_after_tool_result_before_first_chunk(self):
+        repository = FakeRepository()
+        session_factory = FakeSessionFactory()
+
+        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+            self.assertTrue(thinking_enabled)
+
+            async def iterator():
+                yield {"type": "tool_call", "step_id": "call-1", "tool_name": "add", "input_json": '{"a":1,"b":1}'}
+                yield {"type": "tool_result", "step_id": "call-1", "tool_name": "add", "output_json": '{"result":2}'}
+                yield {"type": "text", "text": "答案是 2。", "index": 0}
+
+            return iterator()
+
+        with (
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
+            patch("app.services.chat_service.get_session_factory", return_value=session_factory),
+            patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
+            patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
+            patch("app.services.chat_service.refresh_summary_if_needed", new=AsyncMock()),
+        ):
+            stream = await stream_chat_events(ChatRequest(message="1+1 等于几？", thinking_enabled=True))
+            events = [event async for event in stream]
+
+        self.assertEqual(
+            [name for name, _ in events],
+            ["conversation", "trace_step", "trace_step", "trace_step", "chunk", "trace_done", "done"],
+        )
+        self.assertEqual(events[1][1]["type"], "tool_call")
+        self.assertEqual(events[2][1]["type"], "tool_result")
+        self.assertEqual(events[3][1]["type"], "tool_end")
+        self.assertEqual(events[4], ("chunk", {"content": "答案是 2。"}))
+        self.assertEqual(
+            [(step["type"], step["status"]) for step in repository.messages[-1].trace_steps],
+            [("tool_result", "success"), ("tool_end", "success")],
+        )
+
+    async def test_thinking_enabled_does_not_emit_tool_end_without_tool_result(self):
+        repository = FakeRepository()
+        session_factory = FakeSessionFactory()
+
+        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+            self.assertTrue(thinking_enabled)
+
+            async def iterator():
+                yield {"type": "thinking", "thinking": "先分析用户意图。", "signature": "sig-1", "index": 0}
+
+            return iterator()
+
+        with (
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
+            patch("app.services.chat_service.get_session_factory", return_value=session_factory),
+            patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
+            patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
+            patch("app.services.chat_service.refresh_summary_if_needed", new=AsyncMock()),
+        ):
+            stream = await stream_chat_events(ChatRequest(message="你好", thinking_enabled=True))
+            events = [event async for event in stream]
+
+        trace_types = [payload["type"] for name, payload in events if name == "trace_step"]
+        self.assertEqual(trace_types, ["thinking", "thinking"])
+        self.assertEqual(len(repository.messages), 1)
+
+    async def test_thinking_enabled_emits_tool_end_before_followup_thinking_after_tool_result(self):
+        repository = FakeRepository()
+        session_factory = FakeSessionFactory()
+
+        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+            self.assertTrue(thinking_enabled)
+
+            async def iterator():
+                yield {"type": "tool_call", "step_id": "call-1", "tool_name": "add", "input_json": '{"a":1,"b":1}'}
+                yield {"type": "tool_result", "step_id": "call-1", "tool_name": "add", "output_json": '{"result":2}'}
+                yield {"type": "thinking", "thinking": "再根据工具结果组织回复。", "signature": "sig-2", "index": 0}
+                yield {"type": "text", "text": "答案是 2。", "index": 0}
+
+            return iterator()
+
+        with (
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
+            patch("app.services.chat_service.get_session_factory", return_value=session_factory),
+            patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
+            patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
+            patch("app.services.chat_service.refresh_summary_if_needed", new=AsyncMock()),
+        ):
+            stream = await stream_chat_events(ChatRequest(message="1+1 等于几？", thinking_enabled=True))
+            events = [event async for event in stream]
+
+        trace_types = [payload["type"] for name, payload in events if name == "trace_step"]
+        self.assertEqual(
+            trace_types,
+            ["tool_call", "tool_result", "tool_end", "thinking", "thinking"],
+        )
+
     async def test_thinking_enabled_stop_before_reply_keeps_only_user_message(self):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()

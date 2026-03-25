@@ -4,7 +4,16 @@ from datetime import datetime, timezone
 
 from app.schemas.trace import TraceStep
 
-TRACE_BLOCK_TYPES = {"thinking", "search", "fetch", "tool_call", "tool_result", "retry", "other"}
+TRACE_BLOCK_TYPES = {
+    "thinking",
+    "search",
+    "fetch",
+    "tool_call",
+    "tool_result",
+    "tool_end",
+    "retry",
+    "other",
+}
 TRACE_STEP_STATUSES = {"pending", "running", "success", "error", "skipped"}
 
 

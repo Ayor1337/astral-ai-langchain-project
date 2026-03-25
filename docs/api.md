@@ -116,7 +116,7 @@ conversation -> chunk* -> conversation_title? -> done
 #### 思考模式
 
 ```text
-conversation -> trace_step* -> thinking(success upsert)? -> chunk* -> conversation_title? -> trace_done -> done
+conversation -> trace_step* -> tool_end? -> trace_step* -> chunk* -> conversation_title? -> trace_done -> done
 ```
 
 ### SSE 事件
@@ -147,6 +147,7 @@ conversation -> trace_step* -> thinking(success upsert)? -> chunk* -> conversati
   - `thinking`
   - `tool_call`
   - `tool_result`
+  - `tool_end`
   - `search`
   - `fetch`
   - `retry`
@@ -188,6 +189,13 @@ conversation -> trace_step* -> thinking(success upsert)? -> chunk* -> conversati
 - 当思考结束时，服务端会对同一个 `step_id` 再发送一条 `trace_step(status="success")`
 - 这条 `success` 更新就是“思考结束”的实时信号
 - 如果用户在思考过程中主动停止，服务端不会补发 `thinking success`，而是直接进入 `trace_done.status="stopped"`
+
+`tool_end`
+
+- 仅在 `thinking_enabled=true` 且本轮实际收到 `tool_result` 时出现
+- 统一通过 `trace_step` 返回，表示“工具阶段结束”
+- 该节点跟在对应 `tool_result` 之后发出；后面仍可能继续出现新的 `thinking`，再进入正文
+- 没有工具调用的纯 `thinking -> chunk` 场景不会出现该节点
 
 `trace_done`
 

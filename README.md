@@ -119,6 +119,7 @@ uvicorn app.main:app --reload
 - `thinking`
 - `tool_call`
 - `tool_result`
+- `tool_end`
 - `search`
 - `fetch`
 - `retry`
@@ -128,6 +129,7 @@ uvicorn app.main:app --reload
 
 - 思考过程中持续返回 `trace_step(status="running")`
 - 思考结束时，对同一 `step_id` 再回写一条 `trace_step(status="success")`
+- 工具调用完成并收到 `tool_result` 后，会立即返回一次 `trace_step(type="tool_end")`
 
 前端应按 `step_id` 做 upsert，而不是把这两条当成两个独立节点。
 
