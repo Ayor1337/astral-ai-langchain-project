@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 ChatEvent: TypeAlias = tuple[str, dict[str, Any]]
 TRACE_BLOCK_TYPES = {"thinking", "search", "fetch", "tool_call", "tool_result", "retry", "other"}
 TRACE_STEP_STATUSES = {"pending", "running", "success", "error", "skipped"}
-TITLE_GENERATION_TIMEOUT_SECONDS = 3.0
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
@@ -217,10 +216,9 @@ async def _persist_chat_completion(
     conversation_id: Any,
     assistant_content: str,
     trace_steps: list[TraceStep] | None,
-    generated_title: str | None,
 ) -> None:
-    """在后台持久化 assistant 消息、trace、summary 和标题。"""
-    if not assistant_content and not generated_title:
+    """在后台持久化 assistant 消息、trace 和 summary。"""
+    if not assistant_content:
         return
 
     try:
@@ -242,14 +240,59 @@ async def _persist_chat_completion(
                 except Exception:
                     logger.exception("Failed to refresh conversation summary")
 
-            if generated_title:
-                await repository.update_title(current_conversation, generated_title)
-
             await session.commit()
     except ConversationNotFoundError:
         logger.warning("Conversation disappeared before chat completion persistence finished")
     except Exception:
         logger.exception("Failed to persist chat completion in background")
+
+
+async def _persist_conversation_title_if_default(
+    *,
+    session_factory: Any,
+    conversation_id: Any,
+    generated_title: str,
+) -> None:
+    """仅当标题仍为默认值时补写异步生成出的会话标题。"""
+    try:
+        async with session_factory() as session:
+            repository = ConversationRepository(session)
+            current_conversation = await repository.get_conversation(conversation_id)
+            if current_conversation is None:
+                raise ConversationNotFoundError("conversation not found")
+            if current_conversation.title != DEFAULT_CONVERSATION_TITLE:
+                return
+            await repository.update_title(current_conversation, generated_title)
+            await session.commit()
+    except ConversationNotFoundError:
+        logger.warning("Conversation disappeared before deferred title persistence finished")
+    except Exception:
+        logger.exception("Failed to persist deferred conversation title")
+
+
+async def _persist_generated_conversation_title(
+    *,
+    session_factory: Any,
+    conversation_id: Any,
+    title_task: asyncio.Task[str],
+) -> None:
+    """在后台等待标题生成完成，并在成功后补写默认标题。"""
+    try:
+        generated_title = await title_task
+    except (ConfigurationError, UpstreamServiceError):
+        logger.warning("Failed to generate conversation title", exc_info=True)
+        return
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Failed to generate conversation title")
+        return
+
+    await _persist_conversation_title_if_default(
+        session_factory=session_factory,
+        conversation_id=conversation_id,
+        generated_title=generated_title,
+    )
 
 
 async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
@@ -293,6 +336,23 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
         )
         await session.commit()
     should_generate_title = not recent_messages and conversation.title == DEFAULT_CONVERSATION_TITLE
+    conversation_title_at_stream_start = conversation.title
+    title_task: asyncio.Task[str] | None = None
+    if should_generate_title:
+        title_task = asyncio.create_task(
+            generate_conversation_title(
+                user_message=request.message,
+            )
+        )
+        _spawn_background_task(
+            asyncio.create_task(
+                _persist_generated_conversation_title(
+                    session_factory=session_factory,
+                    conversation_id=conversation.id,
+                    title_task=title_task,
+                )
+            )
+        )
 
     llm_messages = build_context_messages(
         system_prompt=conversation.system_prompt,
@@ -319,7 +379,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                 "conversation",
                 {
                     "conversation_id": str(conversation.id),
-                    "title": conversation.title,
+                    "title": conversation_title_at_stream_start,
                     "run_id": str(run_handle.run_id),
                 },
             )
@@ -329,58 +389,110 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
             next_thinking_step_index = 0
             assistant_text_chunks: list[str] = []
             active_thinking_step_id: str | None = None
+            title_event_emitted = False
+            pending_chunk_task: asyncio.Task[object] | None = None
 
             def _trace_event(step_update: TraceStep) -> ChatEvent:
                 """把增量更新合并到当前 trace 状态后再返回给前端。"""
                 merged = _merge_trace_step(trace_state, step_update)
                 return ("trace_step", merged)
 
+            def _take_ready_title_event() -> ChatEvent | None:
+                """消费已完成的标题任务，最多向前端发送一次标题事件。"""
+                nonlocal title_event_emitted
+                if title_task is None or title_event_emitted or not title_task.done():
+                    return None
+                title_event_emitted = True
+                try:
+                    generated_title = title_task.result()
+                except (ConfigurationError, UpstreamServiceError, asyncio.CancelledError):
+                    return None
+                except Exception:
+                    return None
+                return (
+                    "conversation_title",
+                    {
+                        "conversation_id": str(conversation.id),
+                        "title": generated_title,
+                    },
+                )
+
             async def _close_stream() -> None:
                 """确保底层模型流只被关闭一次，避免 finally 中重复报错。"""
-                nonlocal stream_closed
+                nonlocal stream_closed, pending_chunk_task
                 if stream_closed:
                     return
                 stream_closed = True
+                if pending_chunk_task is not None:
+                    pending_chunk_task.cancel()
+                    with suppress(asyncio.CancelledError, StopAsyncIteration):
+                        await pending_chunk_task
+                    pending_chunk_task = None
                 close_stream = getattr(stream, "aclose", None)
                 if callable(close_stream):
                     with suppress(Exception):
                         await close_stream()
 
-            async def _next_chunk_or_stop() -> object | None:
-                """在下一块输出和停止信号之间竞速，优先响应停止请求。"""
-                nonlocal stopped
+            async def _next_item_or_stop() -> tuple[str, object | None]:
+                """在下一块输出、标题完成和停止信号之间竞速。"""
+                nonlocal stopped, pending_chunk_task
                 if run_handle.stop_event.is_set():
-                    return None
-                chunk_task = asyncio.create_task(anext(stream))
+                    stopped = True
+                    return ("stop", None)
+                if pending_chunk_task is None:
+                    pending_chunk_task = asyncio.create_task(anext(stream))
                 stop_task = asyncio.create_task(run_handle.stop_event.wait())
+                wait_tasks: set[asyncio.Task[object] | asyncio.Task[bool] | asyncio.Task[str]] = {
+                    pending_chunk_task,
+                    stop_task,
+                }
+                if title_task is not None and not title_event_emitted:
+                    wait_tasks.add(title_task)
                 done, pending = await asyncio.wait(
-                    {chunk_task, stop_task},
+                    wait_tasks,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 for pending_task in pending:
-                    pending_task.cancel()
+                    if pending_task is stop_task:
+                        pending_task.cancel()
                 for pending_task in pending:
+                    if pending_task is not stop_task:
+                        continue
                     with suppress(asyncio.CancelledError):
                         await pending_task
                 if stop_task in done:
                     stopped = True
-                    chunk_task.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await chunk_task
-                    return None
-                with suppress(asyncio.CancelledError):
-                    await stop_task
+                    if pending_chunk_task is not None:
+                        pending_chunk_task.cancel()
+                        with suppress(asyncio.CancelledError, StopAsyncIteration):
+                            await pending_chunk_task
+                        pending_chunk_task = None
+                    return ("stop", None)
+                if title_task is not None and title_task in done:
+                    return ("title", None)
                 try:
-                    return chunk_task.result()
+                    chunk = pending_chunk_task.result()
                 except StopAsyncIteration:
-                    return None
+                    pending_chunk_task = None
+                    return ("eof", None)
+                pending_chunk_task = None
+                return ("chunk", chunk)
 
             try:
+                ready_title_event = _take_ready_title_event()
+                if ready_title_event is not None:
+                    yield ready_title_event
+
                 while True:
-                    chunk = await _next_chunk_or_stop()
-                    if chunk is None:
-                        if run_handle.stop_event.is_set():
-                            stopped = True
+                    item_type, chunk = await _next_item_or_stop()
+                    if item_type == "stop":
+                        break
+                    if item_type == "title":
+                        ready_title_event = _take_ready_title_event()
+                        if ready_title_event is not None:
+                            yield ready_title_event
+                        continue
+                    if item_type == "eof":
                         break
                     block = _coerce_stream_block(chunk)
                     if block is None:
@@ -442,21 +554,8 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                     if use_trace and assistant_content
                     else None
                 )
-                generated_title: str | None = None
 
-                if assistant_content and should_generate_title and not stopped:
-                    try:
-                        generated_title = await asyncio.wait_for(
-                            generate_conversation_title(
-                                user_message=request.message,
-                                assistant_message=assistant_content,
-                            ),
-                            timeout=TITLE_GENERATION_TIMEOUT_SECONDS,
-                        )
-                    except (ConfigurationError, UpstreamServiceError, asyncio.TimeoutError):
-                        logger.warning("Failed to generate conversation title", exc_info=True)
-
-                if assistant_content or generated_title:
+                if assistant_content:
                     _spawn_background_task(
                         asyncio.create_task(
                             _persist_chat_completion(
@@ -464,21 +563,15 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                                 conversation_id=conversation.id,
                                 assistant_content=assistant_content,
                                 trace_steps=serialized_trace_steps,
-                                generated_title=generated_title,
                             )
                         )
                     )
                     # 让后台任务先获得一次调度机会；不等待其完成。
                     await asyncio.sleep(0)
 
-                if generated_title:
-                    yield (
-                        "conversation_title",
-                        {
-                            "conversation_id": str(conversation.id),
-                            "title": generated_title,
-                        },
-                    )
+                ready_title_event = _take_ready_title_event()
+                if ready_title_event is not None:
+                    yield ready_title_event
 
                 if use_trace:
                     yield ("trace_done", {"status": "stopped" if stopped else "completed"})

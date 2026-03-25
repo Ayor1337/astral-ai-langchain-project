@@ -230,11 +230,13 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_first_round_generates_conversation_title_event_and_persists_title(self):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
+        release_first_chunk = asyncio.Event()
 
         async def fake_build_chat_stream(messages, *, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
+                await release_first_chunk.wait()
                 yield {"type": "text", "text": "RAG 是一种", "index": 0}
                 yield {"type": "text", "text": "检索增强生成方法。", "index": 1}
 
@@ -253,13 +255,26 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.services.chat_service.refresh_summary_if_needed", new=AsyncMock()),
         ):
             stream = await stream_chat_events(ChatRequest(message="帮我解释 RAG", thinking_enabled=False))
-            events = [event async for event in stream]
+            events: list[tuple[str, dict[str, object]]] = []
+
+            async def consume():
+                async for event in stream:
+                    events.append(event)
+
+            consumer = asyncio.create_task(consume())
+            await wait_for_condition(lambda: any(name == "conversation_title" for name, _ in events))
+            self.assertEqual(
+                [name for name, _ in events],
+                ["conversation", "conversation_title"],
+            )
+            release_first_chunk.set()
+            await asyncio.wait_for(consumer, timeout=1)
 
         self.assertEqual(
             [name for name, _ in events],
-            ["conversation", "chunk", "chunk", "conversation_title", "done"],
+            ["conversation", "conversation_title", "chunk", "chunk", "done"],
         )
-        self.assertEqual(events[-2][1], {"conversation_id": str(repository.conversation.id), "title": "RAG 入门"})
+        self.assertEqual(events[1][1], {"conversation_id": str(repository.conversation.id), "title": "RAG 入门"})
         await wait_for_condition(lambda: repository.conversation.title == "RAG 入门")
         self.assertEqual(repository.conversation.title, "RAG 入门")
         await wait_for_condition(lambda: len(repository.messages) == 2)
@@ -269,11 +284,13 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
         conversation = await repository.create_conversation(title="新对话")
+        release_first_chunk = asyncio.Event()
 
         async def fake_build_chat_stream(messages, *, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
+                await release_first_chunk.wait()
                 yield {"type": "text", "text": "这是首轮回答。", "index": 0}
 
             return iterator()
@@ -293,9 +310,22 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
                     thinking_enabled=False,
                 )
             )
-            events = [event async for event in stream]
+            events: list[tuple[str, dict[str, object]]] = []
 
-        self.assertEqual(events[-2], ("conversation_title", {"conversation_id": str(conversation.id), "title": "首轮标题"}))
+            async def consume():
+                async for event in stream:
+                    events.append(event)
+
+            consumer = asyncio.create_task(consume())
+            await wait_for_condition(lambda: any(name == "conversation_title" for name, _ in events))
+            self.assertEqual(
+                [name for name, _ in events],
+                ["conversation", "conversation_title"],
+            )
+            release_first_chunk.set()
+            await asyncio.wait_for(consumer, timeout=1)
+
+        self.assertEqual(events[1], ("conversation_title", {"conversation_id": str(conversation.id), "title": "首轮标题"}))
         await wait_for_condition(lambda: repository.conversation.title == "首轮标题")
         self.assertEqual(repository.conversation.title, "首轮标题")
 
@@ -396,7 +426,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([name for name, _ in events], ["conversation", "chunk", "done"])
         self.assertEqual(repository.conversation.title, "新对话")
 
-    async def test_done_waits_for_title_generation_before_emitting_done(self):
+    async def test_done_does_not_wait_for_title_generation(self):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
         title_started = asyncio.Event()
@@ -410,9 +440,8 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
 
             return iterator()
 
-        async def fake_generate_title(*, user_message: str, assistant_message: str) -> str:
+        async def fake_generate_title(*, user_message: str) -> str:
             self.assertEqual(user_message, "你好")
-            self.assertEqual(assistant_message, "你好。")
             title_started.set()
             await release_title.wait()
             return "问候对话"
@@ -435,27 +464,28 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             consumer = asyncio.create_task(consume())
             await wait_for_condition(lambda: any(name == "chunk" for name, _ in events))
             await asyncio.wait_for(title_started.wait(), timeout=1)
-            await asyncio.sleep(0)
+            await asyncio.wait_for(consumer, timeout=1)
 
-            self.assertEqual([name for name, _ in events], ["conversation", "chunk"])
-            self.assertFalse(consumer.done())
+            self.assertEqual([name for name, _ in events], ["conversation", "chunk", "done"])
 
             release_title.set()
-            await asyncio.wait_for(consumer, timeout=1)
+            await wait_for_condition(lambda: repository.conversation.title == "问候对话")
 
         self.assertEqual(
             [name for name, _ in events],
-            ["conversation", "chunk", "conversation_title", "done"],
+            ["conversation", "chunk", "done"],
         )
 
     async def test_done_does_not_wait_for_assistant_persistence(self):
         repository = BlockingAssistantWriteRepository()
         session_factory = FakeSessionFactory()
+        release_first_chunk = asyncio.Event()
 
         async def fake_build_chat_stream(messages, *, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
+                await release_first_chunk.wait()
                 yield {"type": "text", "text": "你好。", "index": 0}
 
             return iterator()
@@ -469,21 +499,31 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.services.chat_service.refresh_summary_if_needed", new=AsyncMock()),
         ):
             stream = await stream_chat_events(ChatRequest(message="你好", thinking_enabled=False))
-            events = [event async for event in stream]
+            events: list[tuple[str, dict[str, object]]] = []
+
+            async def consume():
+                async for event in stream:
+                    events.append(event)
+
+            consumer = asyncio.create_task(consume())
+            await wait_for_condition(lambda: any(name == "conversation_title" for name, _ in events))
+            self.assertEqual([name for name, _ in events], ["conversation", "conversation_title"])
+            release_first_chunk.set()
+            await asyncio.wait_for(consumer, timeout=1)
             await wait_for_condition(lambda: repository.assistant_write_started.is_set())
 
             self.assertEqual(
                 [name for name, _ in events],
-                ["conversation", "chunk", "conversation_title", "done"],
+                ["conversation", "conversation_title", "chunk", "done"],
             )
             self.assertEqual(len(repository.messages), 1)
-            self.assertEqual(repository.conversation.title, "新对话")
+            self.assertEqual(repository.conversation.title, "问候对话")
 
             repository.release_assistant_write.set()
             await wait_for_condition(lambda: len(repository.messages) == 2)
-            await wait_for_condition(lambda: repository.conversation.title == "问候对话")
+            self.assertEqual(repository.conversation.title, "问候对话")
 
-    async def test_title_generation_timeout_degrades_without_interrupting_chat(self):
+    async def test_slow_title_generation_does_not_block_done_and_eventually_persists_title(self):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
         title_started = asyncio.Event()
@@ -497,7 +537,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
 
             return iterator()
 
-        async def slow_generate_title(*, user_message: str, assistant_message: str) -> str:
+        async def slow_generate_title(*, user_message: str) -> str:
             title_started.set()
             await release_title.wait()
             return "超时标题"
@@ -508,7 +548,6 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
             patch("app.services.chat_service.generate_conversation_title", side_effect=slow_generate_title),
-            patch("app.services.chat_service.TITLE_GENERATION_TIMEOUT_SECONDS", new=0.01, create=True),
             patch("app.services.chat_service.refresh_summary_if_needed", new=AsyncMock()),
         ):
             stream = await stream_chat_events(ChatRequest(message="帮我解释 RAG", thinking_enabled=False))
@@ -516,12 +555,16 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
                 asyncio.create_task(_collect_events(stream)),
                 timeout=0.5,
             )
+            await asyncio.wait_for(title_started.wait(), timeout=1)
+            self.assertEqual(repository.conversation.title, "新对话")
+            release_title.set()
+            await wait_for_condition(lambda: repository.conversation.title == "超时标题")
 
         self.assertTrue(title_started.is_set())
         self.assertEqual([name for name, _ in events], ["conversation", "chunk", "done"])
-        self.assertEqual(repository.conversation.title, "新对话")
+        self.assertEqual(repository.conversation.title, "超时标题")
 
-    async def test_empty_assistant_content_does_not_generate_title(self):
+    async def test_empty_assistant_content_still_generates_title_from_user_message(self):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
@@ -547,9 +590,10 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             stream = await stream_chat_events(ChatRequest(message="帮我解释 RAG", thinking_enabled=False))
             events = [event async for event in stream]
 
-        self.assertEqual([name for name, _ in events], ["conversation", "done"])
-        title_generator.assert_not_awaited()
-        self.assertEqual(repository.conversation.title, "新对话")
+        self.assertEqual([name for name, _ in events], ["conversation", "conversation_title", "done"])
+        title_generator.assert_awaited_once_with(user_message="帮我解释 RAG")
+        await wait_for_condition(lambda: repository.conversation.title == "不应生成")
+        self.assertEqual(repository.conversation.title, "不应生成")
 
     async def test_thinking_enabled_converts_thinking_and_search_to_trace_steps(self):
         repository = FakeRepository()
@@ -609,12 +653,14 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_thinking_enabled_emits_title_before_trace_done_and_done(self):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
+        release_first_chunk = asyncio.Event()
 
         async def fake_build_chat_stream(messages, *, thinking_enabled=False):
             self.assertTrue(thinking_enabled)
 
             async def iterator():
                 yield {"type": "thinking", "thinking": "先分析用户意图。", "signature": "sig-1", "index": 0}
+                await release_first_chunk.wait()
                 yield {"type": "text", "text": "你好。", "index": 0}
 
             return iterator()
@@ -628,12 +674,63 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.services.chat_service.refresh_summary_if_needed", new=AsyncMock()),
         ):
             stream = await stream_chat_events(ChatRequest(message="你好", thinking_enabled=True))
-            events = [event async for event in stream]
+            events: list[tuple[str, dict[str, object]]] = []
+
+            async def consume():
+                async for event in stream:
+                    events.append(event)
+
+            consumer = asyncio.create_task(consume())
+            await wait_for_condition(
+                lambda: any(name == "conversation_title" for name, _ in events)
+                and any(name == "trace_step" for name, _ in events)
+            )
+            self.assertEqual(
+                [name for name, _ in events],
+                ["conversation", "conversation_title", "trace_step"],
+            )
+            release_first_chunk.set()
+            await asyncio.wait_for(consumer, timeout=1)
 
         self.assertEqual(
             [name for name, _ in events],
-            ["conversation", "trace_step", "trace_step", "chunk", "conversation_title", "trace_done", "done"],
+            ["conversation", "conversation_title", "trace_step", "trace_step", "chunk", "trace_done", "done"],
         )
+
+    async def test_deferred_title_generation_does_not_override_manual_title_change(self):
+        repository = FakeRepository()
+        session_factory = FakeSessionFactory()
+        release_title = asyncio.Event()
+
+        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+            self.assertFalse(thinking_enabled)
+
+            async def iterator():
+                yield {"type": "text", "text": "正常回答。", "index": 0}
+
+            return iterator()
+
+        async def slow_generate_title(*, user_message: str) -> str:
+            await release_title.wait()
+            return "后台标题"
+
+        with (
+            patch("app.services.chat_service.get_settings", return_value=fake_settings()),
+            patch("app.services.chat_service.get_session_factory", return_value=session_factory),
+            patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
+            patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
+            patch("app.services.chat_service.generate_conversation_title", side_effect=slow_generate_title),
+            patch("app.services.chat_service.refresh_summary_if_needed", new=AsyncMock()),
+        ):
+            stream = await stream_chat_events(ChatRequest(message="帮我解释 RAG", thinking_enabled=False))
+            events = await asyncio.wait_for(asyncio.create_task(_collect_events(stream)), timeout=0.5)
+            repository.conversation.title = "手动标题"
+            release_title.set()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+        self.assertEqual([name for name, _ in events], ["conversation", "chunk", "done"])
+        self.assertEqual(repository.conversation.title, "手动标题")
 
     async def test_thinking_enabled_emits_thinking_trace_before_first_chunk_even_if_search_arrives_later(self):
         repository = FakeRepository()
