@@ -260,6 +260,7 @@ async def _persist_conversation_title_if_default(
             current_conversation = await repository.get_conversation(conversation_id)
             if current_conversation is None:
                 raise ConversationNotFoundError("conversation not found")
+            # 这里允许“晚到的标题”补写，但不覆盖用户后续手动改名。
             if current_conversation.title != DEFAULT_CONVERSATION_TITLE:
                 return
             await repository.update_title(current_conversation, generated_title)
@@ -336,9 +337,11 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
         )
         await session.commit()
     should_generate_title = not recent_messages and conversation.title == DEFAULT_CONVERSATION_TITLE
+    # 流开始时先固定一份标题快照，后续即使后台任务先完成，也不改写首个 conversation 事件。
     conversation_title_at_stream_start = conversation.title
     title_task: asyncio.Task[str] | None = None
     if should_generate_title:
+        # 首轮标题独立并行生成，和正文流互不阻塞。
         title_task = asyncio.create_task(
             generate_conversation_title(
                 user_message=request.message,
@@ -372,6 +375,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
     )
 
     async def iterator() -> AsyncIterator[ChatEvent]:
+        """把模型块、标题任务和停止信号编排成统一 SSE 事件流。"""
         stopped = False
         stream_closed = False
         try:
@@ -398,7 +402,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                 return ("trace_step", merged)
 
             def _take_ready_title_event() -> ChatEvent | None:
-                """消费已完成的标题任务，最多向前端发送一次标题事件。"""
+                """标题一旦就绪就立即向前端发出，不必等正文流结束。"""
                 nonlocal title_event_emitted
                 if title_task is None or title_event_emitted or not title_task.done():
                     return None
@@ -434,7 +438,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                         await close_stream()
 
             async def _next_item_or_stop() -> tuple[str, object | None]:
-                """在下一块输出、标题完成和停止信号之间竞速。"""
+                """让标题任务、正文块和停止信号一起竞速，避免标题阻塞正文。"""
                 nonlocal stopped, pending_chunk_task
                 if run_handle.stop_event.is_set():
                     stopped = True
@@ -566,7 +570,7 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                             )
                         )
                     )
-                    # 让后台任务先获得一次调度机会；不等待其完成。
+                    # 先让后台收尾跑起来，再继续推进 SSE 结束。
                     await asyncio.sleep(0)
 
                 ready_title_event = _take_ready_title_event()
