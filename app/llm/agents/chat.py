@@ -175,7 +175,7 @@ async def build_chat_stream(
         thinking_enabled=thinking_enabled,
     )
     langchain_messages = to_langchain_messages(messages)
-    stream_mode = "updates" if thinking_enabled else "messages"
+    stream_mode: str | list[str] = ["messages", "updates"] if thinking_enabled else "messages"
 
     async def iterator() -> AsyncIterator[ContentBlock | str]:
         try:
@@ -187,14 +187,9 @@ async def build_chat_stream(
                     if isinstance(event, tuple) and len(event) == 2 and isinstance(event[0], str):
                         mode, payload = event
                     else:
-                        mode, payload = "updates", event
+                        mode, payload = ("updates", event) if isinstance(event, dict) else ("messages", event)
                 else:
                     mode, payload = "messages", event
-
-                if thinking_enabled and mode == "updates":
-                    for block in _iter_update_blocks(payload):
-                        yield block
-                    continue
 
                 if mode == "messages":
                     for block in _iter_message_stream_blocks(payload):
