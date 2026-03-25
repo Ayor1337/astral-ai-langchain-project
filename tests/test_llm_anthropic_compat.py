@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
 from app.core.config import ModelEndpointSettings
 from app.llm.agents.chat import build_chat_stream
@@ -13,21 +13,38 @@ from app.schemas.chat import ChatMessage
 async def test_build_chat_stream_emits_text_and_thinking_blocks():
     class FakeAgent:
         async def astream(self, payload, *, stream_mode):
-            assert stream_mode == "updates"
-            yield {
-                "model": {
-                    "messages": [
-                        AIMessage(
-                            content=[{"type": "thinking", "thinking": "先分析。", "signature": "sig-1", "index": 0}]
-                        )
-                    ]
-                }
-            }
-            yield {
-                "model": {
-                    "messages": [AIMessage(content=[{"type": "text", "text": "你好", "index": 1}])]
-                }
-            }
+            assert stream_mode == ["messages", "updates"]
+            yield (
+                "messages",
+                (
+                    AIMessageChunk(
+                        content=[{"type": "thinking", "thinking": "先分析。", "signature": "sig-1", "index": 0}]
+                    ),
+                    {"langgraph_node": "model"},
+                ),
+            )
+            yield (
+                "messages",
+                (
+                    AIMessageChunk(content="你"),
+                    {"langgraph_node": "model"},
+                ),
+            )
+            yield (
+                "messages",
+                (
+                    AIMessageChunk(content="好"),
+                    {"langgraph_node": "model"},
+                ),
+            )
+            yield (
+                "updates",
+                {
+                    "model": {
+                        "messages": [AIMessage(content=[{"type": "text", "text": "你好", "index": 1}])]
+                    }
+                },
+            )
 
     with (
         patch(
@@ -48,7 +65,8 @@ async def test_build_chat_stream_emits_text_and_thinking_blocks():
 
     assert chunks == [
         {"type": "thinking", "thinking": "先分析。", "signature": "sig-1", "index": 0},
-        {"type": "text", "text": "你好", "index": 1},
+        {"type": "text", "text": "你", "index": 0},
+        {"type": "text", "text": "好", "index": 0},
     ]
 
 
@@ -56,14 +74,17 @@ async def test_build_chat_stream_emits_text_and_thinking_blocks():
 async def test_build_chat_stream_passthroughs_custom_trace_blocks():
     class FakeAgent:
         async def astream(self, payload, *, stream_mode):
-            assert stream_mode == "updates"
-            yield {
-                "model": {
-                    "messages": [
-                        AIMessage(content=[{"type": "tool_call", "step_id": "tool-1", "tool_name": "web_search"}])
-                    ]
-                }
-            }
+            assert stream_mode == ["messages", "updates"]
+            yield (
+                "updates",
+                {
+                    "model": {
+                        "messages": [
+                            AIMessage(content=[{"type": "tool_call", "step_id": "tool-1", "tool_name": "web_search"}])
+                        ]
+                    }
+                },
+            )
 
     with (
         patch(
@@ -89,29 +110,45 @@ async def test_build_chat_stream_passthroughs_custom_trace_blocks():
 async def test_build_chat_stream_executes_add_tool_and_streams_final_text():
     class FakeAgent:
         async def astream(self, payload, *, stream_mode):
-            assert stream_mode == "updates"
-            yield {
-                "model": {
-                    "messages": [
-                        AIMessage(
-                            content="",
-                            tool_calls=[{"name": "add", "args": {"a": 2, "b": 3}, "id": "call-1"}],
-                        )
-                    ]
-                }
-            }
-            yield {
-                "tools": {
-                    "messages": [
-                        ToolMessage(content='{"result": 5}', name="add", tool_call_id="call-1")
-                    ]
-                }
-            }
-            yield {
-                "model": {
-                    "messages": [AIMessage(content=[{"type": "text", "text": "5", "index": 0}])]
-                }
-            }
+            assert stream_mode == ["messages", "updates"]
+            yield (
+                "updates",
+                {
+                    "model": {
+                        "messages": [
+                            AIMessage(
+                                content="",
+                                tool_calls=[{"name": "add", "args": {"a": 2, "b": 3}, "id": "call-1"}],
+                            )
+                        ]
+                    }
+                },
+            )
+            yield (
+                "updates",
+                {
+                    "tools": {
+                        "messages": [
+                            ToolMessage(content='{"result": 5}', name="add", tool_call_id="call-1")
+                        ]
+                    }
+                },
+            )
+            yield (
+                "messages",
+                (
+                    AIMessageChunk(content="5"),
+                    {"langgraph_node": "model"},
+                ),
+            )
+            yield (
+                "updates",
+                {
+                    "model": {
+                        "messages": [AIMessage(content=[{"type": "text", "text": "5", "index": 0}])]
+                    }
+                },
+            )
 
     with (
         patch(

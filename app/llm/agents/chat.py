@@ -184,9 +184,10 @@ async def build_chat_stream(
                 stream_mode=stream_mode,
             ):
                 if thinking_enabled:
-                    if not (isinstance(event, tuple) and len(event) == 2 and isinstance(event[0], str)):
-                        continue
-                    mode, payload = event
+                    if isinstance(event, tuple) and len(event) == 2 and isinstance(event[0], str):
+                        mode, payload = event
+                    else:
+                        mode, payload = ("updates", event) if isinstance(event, dict) else ("messages", event)
                 else:
                     mode, payload = "messages", event
 
