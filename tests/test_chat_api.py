@@ -49,6 +49,28 @@ def test_stream_chat_returns_chunk_only_when_thinking_disabled(client, monkeypat
     assert "event: done" in body
 
 
+def test_stream_chat_returns_conversation_title_event(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        yield ("conversation", {"conversation_id": "conv-1", "title": "新对话", "run_id": "run-1"})
+        yield ("chunk", {"content": "你好"})
+        yield ("conversation_title", {"conversation_id": "conv-1", "title": "问候对话"})
+        yield ("done", {"status": "completed", "run_id": "run-1"})
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={"message": "你好"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: conversation_title" in body
+    assert '"title":"问候对话"' in body
+    assert body.index("event: conversation_title") < body.index("event: done")
+
+
 def test_stream_chat_returns_trace_steps_and_chunks_when_thinking_enabled(client, monkeypatch):
     async def fake_stream_chat_events(request):
         assert request.thinking_enabled is True

@@ -1,0 +1,1 @@
+创建虚拟环境：`python -m venv .venv`；激活：`.venv\Scripts\activate`；安装依赖：`pip install -r requirements.txt`；启动服务：`uvicorn app.main:app --reload`；启动数据库：`docker compose up -d`；全量测试：`pytest`；聊天相关测试：`pytest tests/test_chat_api.py tests/test_chat_service.py`；Windows 常用命令：`Get-ChildItem`、`Select-String`、`git log --oneline`。

@@ -1,0 +1,1 @@
+遵循 KISS 和 PEP 8，4 空格缩进，显式导入。函数/模块/变量使用 snake_case，类和 schema 使用 PascalCase。路由层保持轻量，provider/LLM 逻辑放在 app/llm。避免过度工程化，必要时添加简洁注释解释非显然逻辑。所有输出、方案与任务清单默认使用中文。

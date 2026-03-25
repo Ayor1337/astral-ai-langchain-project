@@ -11,7 +11,7 @@ from app.llm.exceptions import UpstreamServiceError
 
 DEFAULT_CONVERSATION_TITLE = "新对话"
 TITLE_SYSTEM_PROMPT = (
-    "你是会话标题生成器。请根据给定的首轮问答生成一个简短、准确的标题。"
+    "你是会话标题生成器。请根据给定的用户首条消息生成一个简短、准确的标题。"
     "标题必须是单行，不要带引号、前缀、句号或任何解释。"
     "优先跟随用户消息的主要语言。"
 )
@@ -94,13 +94,11 @@ def _resolve_title_agent_endpoint() -> ModelEndpointSettings:
 async def generate_conversation_title(
     *,
     user_message: str,
-    assistant_message: str,
 ) -> str:
     prompt = (
-        "请基于以下首轮问答生成标题。\n\n"
+        "请基于以下用户首条消息生成标题。\n\n"
         f"用户：{user_message}\n"
-        f"助手：{assistant_message}\n\n"
-        "请直接输出标题。"
+        "\n请直接输出标题。"
     )
     agent = create_title_agent(endpoint=_resolve_title_agent_endpoint())
     try:

@@ -1,0 +1,1 @@
+AstralAI 是基于 FastAPI 的轻量级 AI 聊天后端，提供 SSE 流式聊天、会话管理和 PostgreSQL 持久化。核心目录包括 app/api、app/core、app/llm、app/schemas、app/services、app/repositories、app/db，测试位于 tests。技术栈为 Python 3.13、FastAPI、Uvicorn、PostgreSQL、anthropic/openai。Windows 环境开发。

@@ -23,7 +23,7 @@ def fake_endpoint() -> ModelEndpointSettings:
 
 
 @pytest.mark.anyio
-async def test_generate_conversation_title_uses_title_agent_and_extracts_text():
+async def test_generate_conversation_title_uses_only_user_message_and_extracts_text():
     agent = SimpleNamespace(
         ainvoke=AsyncMock(
             return_value={
@@ -40,11 +40,13 @@ async def test_generate_conversation_title_uses_title_agent_and_extracts_text():
     ):
         title = await generate_conversation_title(
             user_message="帮我查一下 RAG 是什么",
-            assistant_message="我来给你解释 RAG 的概念和用法。",
         )
 
     assert title == "搜索资料"
     agent.ainvoke.assert_awaited_once()
+    prompt = agent.ainvoke.await_args.args[0]["messages"][0].content
+    assert "用户：帮我查一下 RAG 是什么" in prompt
+    assert "助手：" not in prompt
 
 
 @pytest.mark.anyio
@@ -65,7 +67,6 @@ async def test_generate_conversation_title_normalizes_model_output():
     ):
         title = await generate_conversation_title(
             user_message="帮我查一下 RAG 是什么",
-            assistant_message="我来给你解释 RAG 的概念和用法。",
         )
 
     assert title == "RAG 入门指南"
@@ -89,7 +90,6 @@ async def test_generate_conversation_title_falls_back_when_model_returns_empty_t
     ):
         title = await generate_conversation_title(
             user_message="帮我查一下 RAG 是什么",
-            assistant_message="我来给你解释 RAG 的概念和用法。",
         )
 
     assert title == "新对话"
@@ -106,7 +106,6 @@ async def test_generate_conversation_title_wraps_agent_errors():
     ):
         await generate_conversation_title(
             user_message="帮我查一下 RAG 是什么",
-            assistant_message="我来给你解释 RAG 的概念和用法。",
         )
 
 
@@ -118,5 +117,4 @@ async def test_generate_conversation_title_requires_title_agent_configuration():
     ):
         await generate_conversation_title(
             user_message="帮我查一下 RAG 是什么",
-            assistant_message="我来给你解释 RAG 的概念和用法。",
         )
