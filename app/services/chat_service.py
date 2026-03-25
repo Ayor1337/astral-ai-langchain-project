@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 ChatEvent: TypeAlias = tuple[str, dict[str, Any]]
 TRACE_BLOCK_TYPES = {"thinking", "search", "fetch", "tool_call", "tool_result", "retry", "other"}
 TRACE_STEP_STATUSES = {"pending", "running", "success", "error", "skipped"}
+TITLE_GENERATION_TIMEOUT_SECONDS = 3.0
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
 def _utcnow_iso() -> str:
@@ -201,6 +203,53 @@ def _finalize_thinking_step(
         "status": "success",
         "timestamp": _utcnow_iso(),
     }
+
+
+def _spawn_background_task(task: asyncio.Task[None]) -> None:
+    """跟踪后台收尾任务，避免未引用任务在运行中丢失。"""
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+
+async def _persist_chat_completion(
+    *,
+    session_factory: Any,
+    conversation_id: Any,
+    assistant_content: str,
+    trace_steps: list[TraceStep] | None,
+    generated_title: str | None,
+) -> None:
+    """在后台持久化 assistant 消息、trace、summary 和标题。"""
+    if not assistant_content and not generated_title:
+        return
+
+    try:
+        async with session_factory() as session:
+            repository = ConversationRepository(session)
+            current_conversation = await repository.get_conversation(conversation_id)
+            if current_conversation is None:
+                raise ConversationNotFoundError("conversation not found")
+
+            if assistant_content:
+                await repository.add_message(
+                    current_conversation,
+                    role="assistant",
+                    content=assistant_content,
+                    trace_steps=trace_steps,
+                )
+                try:
+                    await refresh_summary_if_needed(repository, current_conversation)
+                except Exception:
+                    logger.exception("Failed to refresh conversation summary")
+
+            if generated_title:
+                await repository.update_title(current_conversation, generated_title)
+
+            await session.commit()
+    except ConversationNotFoundError:
+        logger.warning("Conversation disappeared before chat completion persistence finished")
+    except Exception:
+        logger.exception("Failed to persist chat completion in background")
 
 
 async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
@@ -385,78 +434,42 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
                         yield _trace_event(finalized_thinking)
 
                 assistant_content = "".join(assistant_text_chunks)
-                assistant_message_id: int | None = None
+                serialized_trace_steps = (
+                    _serialize_trace_steps(
+                        trace_state,
+                        finalize_running=not stopped,
+                    )
+                    if use_trace and assistant_content
+                    else None
+                )
                 generated_title: str | None = None
-
-                try:
-                    async with session_factory() as session:
-                        repository = ConversationRepository(session)
-                        current_conversation = await repository.get_conversation(conversation.id)
-                        if current_conversation is None:
-                            raise ConversationNotFoundError("conversation not found")
-                        if assistant_content:
-                            # 只有确实产出正文时才落 assistant 消息，避免空消息污染历史。
-                            assistant_message = await repository.add_message(
-                                current_conversation,
-                                role="assistant",
-                                content=assistant_content,
-                            )
-                            assistant_message_id = assistant_message.id
-                            try:
-                                await refresh_summary_if_needed(repository, current_conversation)
-                            except Exception:
-                                logger.exception("Failed to refresh conversation summary")
-                        await session.commit()
-                except ConversationNotFoundError as exc:
-                    yield ("error", {"detail": str(exc)})
-                    return
-                except Exception:
-                    logger.exception("Failed to persist assistant message")
-                    yield ("error", {"detail": "internal server error"})
-                    return
 
                 if assistant_content and should_generate_title and not stopped:
                     try:
-                        generated_title = await generate_conversation_title(
-                            user_message=request.message,
-                            assistant_message=assistant_content,
+                        generated_title = await asyncio.wait_for(
+                            generate_conversation_title(
+                                user_message=request.message,
+                                assistant_message=assistant_content,
+                            ),
+                            timeout=TITLE_GENERATION_TIMEOUT_SECONDS,
                         )
-                    except (ConfigurationError, UpstreamServiceError):
+                    except (ConfigurationError, UpstreamServiceError, asyncio.TimeoutError):
                         logger.warning("Failed to generate conversation title", exc_info=True)
 
-                if generated_title:
-                    try:
-                        async with session_factory() as session:
-                            repository = ConversationRepository(session)
-                            current_conversation = await repository.get_conversation(conversation.id)
-                            if current_conversation is not None:
-                                await repository.update_title(current_conversation, generated_title)
-                                await session.commit()
-                            else:
-                                generated_title = None
-                    except Exception:
-                        logger.exception("Failed to persist conversation title")
-                        generated_title = None
-
-                if assistant_message_id is not None and use_trace:
-                    try:
-                        async with session_factory() as session:
-                            repository = ConversationRepository(session)
-                            message = await repository.get_message(assistant_message_id)
-                            if message is None:
-                                raise ConversationNotFoundError("assistant message not found")
-                            await repository.update_message_trace(
-                                message,
-                                trace_steps=_serialize_trace_steps(
-                                    trace_state,
-                                    finalize_running=not stopped,
-                                ),
+                if assistant_content or generated_title:
+                    _spawn_background_task(
+                        asyncio.create_task(
+                            _persist_chat_completion(
+                                session_factory=session_factory,
+                                conversation_id=conversation.id,
+                                assistant_content=assistant_content,
+                                trace_steps=serialized_trace_steps,
+                                generated_title=generated_title,
                             )
-                            await session.commit()
-                    except Exception:
-                        logger.exception("Failed to persist assistant trace")
-                        yield ("error", {"detail": "internal server error"})
-                        return
+                        )
+                    )
+                    # 让后台任务先获得一次调度机会；不等待其完成。
+                    await asyncio.sleep(0)
 
                 if generated_title:
                     yield (
