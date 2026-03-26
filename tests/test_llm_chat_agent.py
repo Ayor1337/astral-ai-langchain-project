@@ -40,12 +40,10 @@ class ChatAgentStreamTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        with (
-            patch("app.llm.agents.chat.get_settings", return_value=fake_settings()),
-            patch("app.llm.agents.chat.create_chat_agent", return_value=agent),
-        ):
+        with patch("app.llm.agents.chat.create_chat_agent", return_value=agent):
             stream = await build_chat_stream(
                 [ChatMessage(role="user", content="hello")],
+                endpoint=fake_settings().chat_endpoint,
                 thinking_enabled=False,
             )
             blocks = [block async for block in stream]
@@ -111,12 +109,10 @@ class ChatAgentStreamTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        with (
-            patch("app.llm.agents.chat.get_settings", return_value=fake_settings()),
-            patch("app.llm.agents.chat.create_chat_agent", return_value=agent),
-        ):
+        with patch("app.llm.agents.chat.create_chat_agent", return_value=agent):
             stream = await build_chat_stream(
                 [ChatMessage(role="user", content="hello")],
+                endpoint=fake_settings().chat_endpoint,
                 thinking_enabled=True,
             )
             blocks = [block async for block in stream]
@@ -140,6 +136,29 @@ class ChatAgentStreamTests(unittest.IsolatedAsyncioTestCase):
                 },
                 {"type": "text", "text": "lo", "index": 0},
             ],
+        )
+
+    async def test_build_chat_stream_uses_explicit_endpoint_instead_of_global_settings(self):
+        endpoint = ModelEndpointSettings(
+            provider="anthropic",
+            api_key="explicit-key",
+            base_url="https://example.com",
+            model="explicit-model",
+        )
+        agent = FakeAgent([])
+
+        with patch("app.llm.agents.chat.create_chat_agent", return_value=agent) as create_agent_mock:
+            stream = await build_chat_stream(
+                [ChatMessage(role="user", content="hello")],
+                endpoint=endpoint,
+                thinking_enabled=True,
+            )
+            blocks = [block async for block in stream]
+
+        self.assertEqual(blocks, [])
+        create_agent_mock.assert_called_once_with(
+            endpoint=endpoint,
+            thinking_enabled=True,
         )
 
 

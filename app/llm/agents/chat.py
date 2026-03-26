@@ -5,11 +5,11 @@ from typing import Any
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, ToolMessage
 
-from app.core.config import ModelEndpointSettings, get_settings
+from app.core.config import ModelEndpointSettings
+from app.llm.capabilities import validate_chat_capabilities as _validate_chat_capabilities
 from app.llm.exceptions import UpstreamServiceError
 from app.llm.messages import ContentBlock, normalize_content_blocks, to_langchain_messages
 from app.llm.models.factory import create_chat_model
-from app.llm.providers import get_provider
 from app.llm.tools import get_chat_tools
 from app.schemas.chat import ChatMessage
 
@@ -20,7 +20,6 @@ def create_chat_agent(
     thinking_enabled: bool = False,
 ):
     """创建带工具能力的聊天 agent。"""
-    validate_chat_capabilities(endpoint=endpoint, thinking_enabled=thinking_enabled)
     model = create_chat_model(
         endpoint=endpoint,
         streaming=True,
@@ -39,10 +38,7 @@ def validate_chat_capabilities(
     thinking_enabled: bool = False,
 ) -> None:
     """在真正创建模型前校验 provider 是否支持请求能力。"""
-    if not thinking_enabled:
-        return
-    provider = get_provider(endpoint.provider)
-    provider.validate_chat_capabilities(
+    _validate_chat_capabilities(
         endpoint=endpoint,
         thinking_enabled=thinking_enabled,
     )
@@ -166,10 +162,10 @@ def _iter_filtered_update_blocks(payload: object) -> list[ContentBlock]:
 async def build_chat_stream(
     messages: Sequence[ChatMessage],
     *,
+    endpoint: ModelEndpointSettings,
     thinking_enabled: bool = False,
 ) -> AsyncIterator[ContentBlock | str]:
     """构建聊天流，并把底层异常统一转换成上游服务异常。"""
-    endpoint = get_settings().chat_endpoint
     agent = create_chat_agent(
         endpoint=endpoint,
         thinking_enabled=thinking_enabled,
