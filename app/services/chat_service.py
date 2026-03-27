@@ -22,7 +22,6 @@ from app.services.memory_service import refresh_summary_if_needed
 
 SEARCH_SYSTEM_PROMPT = (
     "当且仅当问题需要最新信息、新闻、事实核验或明显依赖联网信息时，才调用 web_search。"
-    "使用搜索结果回答时，请在对应句子后用 [1][2] 这样的数字引用标注来源顺序。"
     "如果搜索无结果或搜索失败，请直接基于已有上下文回答，且不要编造来源。"
 )
 
