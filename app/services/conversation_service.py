@@ -10,7 +10,10 @@ DEFAULT_CONVERSATION_TITLE = "新对话"
 
 
 def _to_list_item(conversation: Conversation) -> ConversationListItem:
-    """将 ORM 对象收敛为列表视图模型。"""
+    """将 ORM 对象收敛为列表视图模型。
+
+    只保留列表页需要的最小字段。
+    """
     return ConversationListItem(
         id=conversation.id,
         title=conversation.title,
@@ -21,7 +24,10 @@ def _to_list_item(conversation: Conversation) -> ConversationListItem:
 
 
 def _to_message_view(message: ConversationMessage) -> ConversationMessageView:
-    """将消息实体转换为详情接口返回结构。"""
+    """将消息实体转换为详情接口返回结构。
+
+    把数据库字段映射为前端可直接消费的消息视图。
+    """
     return ConversationMessageView(
         role=message.role,
         content=message.content,
@@ -32,7 +38,10 @@ def _to_message_view(message: ConversationMessage) -> ConversationMessageView:
 
 
 async def create_conversation() -> ConversationListItem:
-    """创建空会话并返回列表项视图。"""
+    """创建空会话并返回列表项视图。
+
+    用于前端在发出第一条消息前先拿到稳定的会话资源。
+    """
     session_factory = get_session_factory()
     async with session_factory() as session:
         repository = ConversationRepository(session)
@@ -42,7 +51,10 @@ async def create_conversation() -> ConversationListItem:
 
 
 async def list_conversations() -> list[ConversationListItem]:
-    """加载会话列表，不在服务层重复处理排序逻辑。"""
+    """加载会话列表，不在服务层重复处理排序逻辑。
+
+    排序和过滤规则都由仓储层统一负责。
+    """
     session_factory = get_session_factory()
     async with session_factory() as session:
         repository = ConversationRepository(session)
@@ -51,7 +63,10 @@ async def list_conversations() -> list[ConversationListItem]:
 
 
 async def get_conversation_detail(conversation_id: UUID) -> ConversationDetail:
-    """返回会话元数据与按顺序排列的消息历史。"""
+    """返回会话元数据与按顺序排列的消息历史。
+
+    如果会话不存在，直接抛出统一的领域错误。
+    """
     session_factory = get_session_factory()
     async with session_factory() as session:
         repository = ConversationRepository(session)
@@ -66,7 +81,10 @@ async def get_conversation_detail(conversation_id: UUID) -> ConversationDetail:
 
 
 async def update_conversation_title(conversation_id: UUID, title: str) -> ConversationListItem:
-    """更新标题并返回最新列表视图。"""
+    """更新标题并返回最新列表视图。
+
+    提交后立即返回与列表页一致的数据。
+    """
     session_factory = get_session_factory()
     async with session_factory() as session:
         repository = ConversationRepository(session)
@@ -79,7 +97,10 @@ async def update_conversation_title(conversation_id: UUID, title: str) -> Conver
 
 
 async def delete_conversation(conversation_id: UUID) -> None:
-    """执行软删除，让历史数据仍可保留在数据库中。"""
+    """执行软删除，让历史数据仍可保留在数据库中。
+
+    删除后仅隐藏会话，不清理底层记录。
+    """
     session_factory = get_session_factory()
     async with session_factory() as session:
         repository = ConversationRepository(session)

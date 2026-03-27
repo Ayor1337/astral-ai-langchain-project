@@ -27,7 +27,10 @@ SEARCH_SYSTEM_PROMPT = (
 
 
 async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
-    """协调会话读写、模型流式输出、停止控制和最终持久化。"""
+    """协调会话读写、模型流式输出、停止控制和最终持久化。
+
+    这是聊天接口的主编排入口，负责把所有异步环节串起来。
+    """
     settings = get_settings()
     session_factory = get_session_factory()
 
@@ -95,6 +98,10 @@ __all__ = ["ChatEvent", "stream_chat_events"]
 
 
 def _build_llm_messages(messages, *, search_enabled: bool):
+    """按需为模型消息前置搜索系统提示。
+
+    启用联网搜索时，把搜索约束作为第一条 system 消息注入。
+    """
     if not search_enabled:
         return messages
     from app.schemas.chat import ChatMessage

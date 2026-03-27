@@ -8,7 +8,14 @@ from app.db.models import Base
 
 
 def normalize_database_url(database_url: str) -> str:
-    """将同步风格的 PostgreSQL DSN 归一化为 asyncpg 可用格式。"""
+    """将数据库地址归一化为 asyncpg 可用格式。
+
+    Args:
+        database_url: 原始数据库地址。
+
+    Returns:
+        归一化后的数据库地址。
+    """
     normalized = database_url.strip()
     if normalized.startswith("postgresql://"):
         return normalized.replace("postgresql://", "postgresql+asyncpg://", 1)
@@ -16,7 +23,14 @@ def normalize_database_url(database_url: str) -> str:
 
 
 def get_database_url() -> str:
-    """读取并校验数据库地址，缺失或格式非法时直接阻止数据库初始化。"""
+    """读取并校验数据库地址。
+
+    Returns:
+        归一化后的数据库地址。
+
+    Raises:
+        ConfigurationError: 数据库地址缺失或格式非法时抛出。
+    """
     database_url = _get_setting_value("DATABASE_URL")
     if not database_url:
         raise ConfigurationError("DATABASE_URL is not configured")
@@ -30,18 +44,29 @@ def get_database_url() -> str:
 
 @lru_cache
 def get_engine() -> AsyncEngine:
-    """缓存异步引擎，避免重复创建连接池。"""
+    """创建并缓存异步数据库引擎。
+
+    Returns:
+        供 SQLAlchemy 使用的异步引擎。
+    """
     return create_async_engine(get_database_url(), future=True)
 
 
 @lru_cache
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
-    """为服务层提供统一的异步会话工厂。"""
+    """创建并缓存异步会话工厂。
+
+    Returns:
+        供服务层使用的会话工厂。
+    """
     return async_sessionmaker(get_engine(), expire_on_commit=False)
 
 
 async def init_db() -> None:
-    """启动时确保表存在，并清理历史版本遗留字段。"""
+    """初始化数据库结构并清理历史遗留字段。
+
+    该操作是幂等的，适合在应用启动阶段执行。
+    """
     engine = get_engine()
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -55,7 +80,10 @@ async def init_db() -> None:
 
 
 async def close_db() -> None:
-    """关闭连接池并清空缓存，避免热重载后保留失效连接。"""
+    """关闭数据库连接并清理缓存。
+
+    这样可以避免热重载后继续保留失效连接。
+    """
     if get_engine.cache_info().currsize == 0:
         return
     engine = get_engine()

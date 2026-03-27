@@ -9,7 +9,11 @@ from sqlalchemy.types import Uuid
 
 
 def utcnow() -> datetime:
-    """统一生成带时区的 UTC 时间，避免混入本地时区时间。"""
+    """返回当前带时区的 UTC 时间。
+
+    Returns:
+        当前 UTC 时间。
+    """
     return datetime.now(timezone.utc)
 
 

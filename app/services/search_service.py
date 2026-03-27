@@ -9,12 +9,25 @@ from app.core.config import SearchSettings
 
 
 class TavilySearchService:
-    """封装 Tavily 搜索，并把结果收敛为对模型稳定的最小结构。"""
+    """封装 Tavily 搜索，并把结果收敛为对模型稳定的最小结构。
+
+    对上层只暴露稳定的查询与结果形状，不泄漏 HTTP 细节。
+    """
 
     def __init__(self, settings: SearchSettings):
+        """初始化 Tavily 搜索服务。
+
+        Args:
+            self: 服务实例本身。
+            settings: 搜索配置。
+        """
         self._settings = settings
 
     async def search(self, query: str) -> dict[str, object]:
+        """执行 Tavily 搜索并归一化返回结构。
+
+        请求失败或超时时返回空结果和错误信息，保证上层响应稳定。
+        """
         try:
             async with httpx.AsyncClient(timeout=self._settings.timeout_seconds) as client:
                 response = await client.post(
@@ -46,6 +59,10 @@ class TavilySearchService:
 
 
 def _normalize_search_results(payload: object) -> list[dict[str, str]]:
+    """从 Tavily 响应中提取稳定的搜索结果列表。
+
+    只保留标题、链接和摘要，过滤掉无效条目。
+    """
     if not isinstance(payload, dict):
         return []
 

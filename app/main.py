@@ -14,7 +14,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """在应用启动和关闭时管理数据库连接生命周期。"""
+    """管理应用启动和关闭期间的数据库连接。
+
+    Args:
+        _: FastAPI 应用实例。
+
+    Yields:
+        运行中的应用生命周期上下文。
+    """
     try:
         # 缺少数据库配置时允许 API 继续启动，便于仅调试不依赖持久化的场景。
         await init_db()
@@ -44,5 +51,9 @@ app.include_router(conversations_router)
 
 @app.get("/")
 async def root():
-    """提供最小健康检查入口。"""
+    """提供最小健康检查入口。
+
+    Returns:
+        表示服务运行中的简单消息。
+    """
     return {"message": "AstralAI is running"}

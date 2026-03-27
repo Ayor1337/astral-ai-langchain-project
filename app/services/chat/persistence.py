@@ -16,7 +16,10 @@ _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
 def spawn_background_task(task: asyncio.Task[None]) -> None:
-    """跟踪后台收尾任务，避免未引用任务在运行中丢失。"""
+    """跟踪后台收尾任务，避免未引用任务在运行中丢失。
+
+    把任务加入全局集合，直到任务结束后自动移除。
+    """
     _BACKGROUND_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_TASKS.discard)
 
@@ -30,7 +33,10 @@ async def persist_chat_completion(
     trace_steps: list[TraceStep] | None,
     refresh_summary_fn: Callable[[Any, Any], Any],
 ) -> None:
-    """在后台持久化 assistant 消息、trace 和 summary。"""
+    """在后台持久化 assistant 消息、trace 和 summary。
+
+    持久化失败只记录日志，不影响前端流式响应。
+    """
     if not assistant_content:
         return
 
@@ -66,7 +72,10 @@ async def persist_conversation_title_if_default(
     conversation_id: Any,
     generated_title: str,
 ) -> None:
-    """仅当标题仍为默认值时补写异步生成出的会话标题。"""
+    """仅当标题仍为默认值时补写异步生成出的会话标题。
+
+    这样不会覆盖用户后续手动修改的标题。
+    """
     try:
         async with session_factory() as session:
             repository = repository_factory(session)
@@ -91,7 +100,10 @@ async def persist_generated_conversation_title(
     conversation_id: Any,
     title_task: asyncio.Task[str],
 ) -> None:
-    """在后台等待标题生成完成，并在成功后补写默认标题。"""
+    """在后台等待标题生成完成，并在成功后补写默认标题。
+
+    标题生成失败会降级为日志告警。
+    """
     try:
         generated_title = await title_task
     except (ConfigurationError, UpstreamServiceError):

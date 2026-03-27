@@ -15,4 +15,15 @@ class BaseChatProvider(Protocol):
         endpoint: ModelEndpointSettings,
         streaming: bool,
         thinking_enabled: bool = False,
-    ) -> Any: ...
+    ) -> Any:
+        """创建聊天模型实例。
+
+        Args:
+            endpoint: 模型端点配置。
+            streaming: 是否启用流式输出。
+            thinking_enabled: 是否请求 thinking 能力。
+
+        Returns:
+            任意兼容的 LangChain 聊天模型对象。
+        """
+        ...

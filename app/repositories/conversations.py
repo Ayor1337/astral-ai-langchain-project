@@ -10,12 +10,21 @@ from app.db.models import Conversation, ConversationMessage
 
 
 def utcnow() -> datetime:
-    """仓储层统一使用 UTC 时间更新审计字段。"""
+    """仓储层统一使用 UTC 时间更新审计字段。
+
+    这样所有时间写入都来自同一时区基准。
+    """
     return datetime.now(timezone.utc)
 
 
 class ConversationRepository:
     def __init__(self, session: AsyncSession):
+        """初始化会话仓储。
+
+        Args:
+            self: 仓储实例本身。
+            session: 当前异步数据库会话。
+        """
         self.session = session
 
     async def create_conversation(
@@ -24,7 +33,10 @@ class ConversationRepository:
         user_id: str | None = None,
         system_prompt: str | None = None,
     ) -> Conversation:
-        """创建会话并立即 flush，确保调用方能拿到主键。"""
+        """创建会话并立即 flush，确保调用方能拿到主键。
+
+        这样后续消息写入可以直接复用数据库生成的 id。
+        """
         conversation = Conversation(
             title=title,
             user_id=user_id,
@@ -40,14 +52,20 @@ class ConversationRepository:
         *,
         include_deleted: bool = False,
     ) -> Conversation | None:
-        """按需过滤软删除会话，避免业务层重复拼接条件。"""
+        """按需过滤软删除会话，避免业务层重复拼接条件。
+
+        调用方只需决定是否需要包含已删除数据。
+        """
         query = select(Conversation).where(Conversation.id == conversation_id)
         if not include_deleted:
             query = query.where(Conversation.deleted_at.is_(None))
         return await self.session.scalar(query)
 
     async def list_active_conversations(self) -> list[Conversation]:
-        """按最近更新时间倒序返回仍可见的会话。"""
+        """按最近更新时间倒序返回仍可见的会话。
+
+        该方法只负责可见性与排序，不做额外加工。
+        """
         result = await self.session.scalars(
             select(Conversation)
             .where(Conversation.deleted_at.is_(None))
@@ -56,14 +74,20 @@ class ConversationRepository:
         return list(result.all())
 
     async def update_title(self, conversation: Conversation, title: str) -> Conversation:
-        """修改标题时同时刷新 updated_at，保持列表排序稳定。"""
+        """修改标题时同时刷新 updated_at，保持列表排序稳定。
+
+        这样列表接口可以直接按更新时间展示最新改动。
+        """
         conversation.title = title
         conversation.updated_at = utcnow()
         await self.session.flush()
         return conversation
 
     async def soft_delete(self, conversation: Conversation) -> None:
-        """通过 deleted_at 标记删除，而不是直接物理删除。"""
+        """通过 deleted_at 标记删除，而不是直接物理删除。
+
+        保留历史数据，便于详情查询和审计。
+        """
         now = utcnow()
         conversation.deleted_at = now
         conversation.updated_at = now
@@ -77,7 +101,10 @@ class ConversationRepository:
         content: str,
         trace_steps: list[dict[str, object]] | None = None,
     ) -> ConversationMessage:
-        """为消息分配单会话递增 sequence，供上下文窗口和展示层复用。"""
+        """为消息分配单会话递增 sequence，供上下文窗口和展示层复用。
+
+        `sequence` 保证同一会话内消息顺序稳定。
+        """
         current_max = await self.session.scalar(
             select(func.coalesce(func.max(ConversationMessage.sequence), 0)).where(
                 ConversationMessage.conversation_id == conversation.id
@@ -101,13 +128,19 @@ class ConversationRepository:
         *,
         trace_steps: list[dict[str, object]] | None,
     ) -> ConversationMessage:
-        """在生成结束后补写 trace，避免消息正文和追踪信息的写入时序互相阻塞。"""
+        """在生成结束后补写 trace，避免消息正文和追踪信息的写入时序互相阻塞。
+
+        这样正文先落库，trace 可在后续异步阶段补齐。
+        """
         message.trace_steps = trace_steps
         await self.session.flush()
         return message
 
     async def list_messages(self, conversation_id: UUID) -> list[ConversationMessage]:
-        """按自然会话顺序返回全部消息。"""
+        """按自然会话顺序返回全部消息。
+
+        结果顺序可直接用于详情页展示。
+        """
         result = await self.session.scalars(
             select(ConversationMessage)
             .where(ConversationMessage.conversation_id == conversation_id)
@@ -116,6 +149,10 @@ class ConversationRepository:
         return list(result.all())
 
     async def get_message(self, message_id: int) -> ConversationMessage | None:
+        """按主键加载单条消息。
+
+        返回 `None` 表示消息不存在或已被上层条件过滤。
+        """
         return await self.session.get(ConversationMessage, message_id)
 
     async def list_recent_messages(
@@ -125,7 +162,10 @@ class ConversationRepository:
         limit: int,
         before_sequence: int | None = None,
     ) -> list[ConversationMessage]:
-        """截取当前消息之前的最近窗口，并在返回前恢复正序。"""
+        """截取当前消息之前的最近窗口，并在返回前恢复正序。
+
+        用于为模型构建有限长度的上下文。
+        """
         query = select(ConversationMessage).where(ConversationMessage.conversation_id == conversation_id)
         if before_sequence is not None:
             query = query.where(ConversationMessage.sequence < before_sequence)
@@ -137,7 +177,10 @@ class ConversationRepository:
         return messages
 
     async def count_messages(self, conversation_id: UUID) -> int:
-        """统计单会话消息总数，供摘要刷新阈值判断使用。"""
+        """统计单会话消息总数，供摘要刷新阈值判断使用。
+
+        只返回数量，不加载实体。
+        """
         count = await self.session.scalar(
             select(func.count())
             .select_from(ConversationMessage)
@@ -152,7 +195,10 @@ class ConversationRepository:
         from_sequence_exclusive: int,
         to_sequence_inclusive: int,
     ) -> list[ConversationMessage]:
-        """取出尚未汇总且已脱离上下文窗口的消息区间。"""
+        """取出尚未汇总且已脱离上下文窗口的消息区间。
+
+        这样摘要只覆盖真正需要压缩的历史消息。
+        """
         result = await self.session.scalars(
             select(ConversationMessage)
             .where(
@@ -171,7 +217,10 @@ class ConversationRepository:
         summary: str,
         summary_message_count: int,
     ) -> Conversation:
-        """更新会话摘要及其已汇总边界。"""
+        """更新会话摘要及其已汇总边界。
+
+        摘要写回后可以继续沿用同一窗口策略。
+        """
         conversation.summary = summary
         conversation.summary_message_count = summary_message_count
         conversation.updated_at = utcnow()

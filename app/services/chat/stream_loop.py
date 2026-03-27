@@ -39,9 +39,16 @@ async def build_stream_event_iterator(
     refresh_summary_fn: Callable[[Any, Any], Any],
     persist_chat_completion_fn: Callable[..., Any],
 ) -> AsyncIterator[ChatEvent]:
-    """把模型块、标题任务和停止信号编排成统一 SSE 事件流。"""
+    """把模型块、标题任务和停止信号编排成统一 SSE 事件流。
+
+    统一处理流式块、标题回填、停止控制和后台持久化。
+    """
 
     async def iterator() -> AsyncIterator[ChatEvent]:
+        """将流式模型输出转换为 SSE 事件序列。
+
+        负责拉取块、维护 trace、处理停止信号和后台持久化。
+        """
         stopped = False
         stream_closed = False
         try:
@@ -65,10 +72,18 @@ async def build_stream_event_iterator(
             pending_chunk_task: asyncio.Task[object] | None = None
 
             def trace_event(step_update: TraceStep) -> ChatEvent:
+                """把 trace 更新合并到本地状态并产出事件。
+
+                合并后返回统一的 `trace_step` SSE 事件。
+                """
                 merged = merge_trace_step(trace_state, step_update)
                 return ("trace_step", merged)
 
             def take_tool_end_event(tool_result_step_id: str) -> ChatEvent | None:
+                """为工具执行结果补一个结束事件。
+
+                用于把 `tool_result` 和 `tool_end` 事件串成完整阶段。
+                """
                 nonlocal trace_order
                 if not tool_result_step_id:
                     return None
@@ -86,6 +101,10 @@ async def build_stream_event_iterator(
                 return event
 
             def take_ready_title_event() -> ChatEvent | None:
+                """在标题任务完成后产出会话标题事件。
+
+                如果标题生成失败或尚未完成，则返回 `None`。
+                """
                 nonlocal title_event_emitted
                 if title_task is None or title_event_emitted or not title_task.done():
                     return None
@@ -105,6 +124,10 @@ async def build_stream_event_iterator(
                 )
 
             async def close_stream() -> None:
+                """关闭底层流并清理挂起的 chunk 任务。
+
+                确保异常和正常结束都不会泄漏异步任务。
+                """
                 nonlocal stream_closed, pending_chunk_task
                 if stream_closed:
                     return
@@ -120,6 +143,10 @@ async def build_stream_event_iterator(
                         await close_stream_fn()
 
             async def next_item_or_stop() -> tuple[str, object | None]:
+                """等待下一块流式数据、标题完成或停止信号。
+
+                按优先级把不同异步来源收敛成统一状态。
+                """
                 nonlocal stopped, pending_chunk_task
                 if run_handle.stop_event.is_set():
                     stopped = True
@@ -312,6 +339,10 @@ def _collect_search_sources(
     collected_sources: list[dict[str, str]],
     seen_source_urls: set[str],
 ) -> None:
+    """从搜索块中收集可公开展示的来源列表。
+
+    只保留成功结果、去重链接和有效文本字段。
+    """
     if block.get("status") != "success":
         return
     payload = block.get("payload")
@@ -347,6 +378,10 @@ def _finalize_sources(
     collected_sources: list[dict[str, str]],
     assistant_content: str,
 ) -> list[dict[str, object]]:
+    """根据引用标记裁剪最终来源列表。
+
+    如果正文没有引用，则保留全部来源。
+    """
     indexed_sources = [
         {
             "index": index,
@@ -364,6 +399,10 @@ def _finalize_sources(
 
 
 def _extract_citation_indexes(text: str, *, limit: int) -> list[int]:
+    """从文本中提取去重后的引用编号。
+
+    只返回落在有效范围内的引用顺序。
+    """
     indexes: list[int] = []
     seen: set[int] = set()
     for match in re.finditer(r"\[(\d+)\]", text):

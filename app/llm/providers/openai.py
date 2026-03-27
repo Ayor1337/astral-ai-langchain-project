@@ -14,7 +14,16 @@ class OpenAIProvider:
         streaming: bool,
         thinking_enabled: bool = False,
     ) -> ChatOpenAI:
-        """构造 LangChain OpenAI 聊天模型实例。"""
+        """构造 LangChain OpenAI 聊天模型实例。
+
+        Args:
+            endpoint: 模型端点配置。
+            streaming: 是否启用流式输出。
+            thinking_enabled: 统一接口占位参数，OpenAI provider 不使用该值。
+
+        Returns:
+            已配置好的 ChatOpenAI 实例。
+        """
         return ChatOpenAI(
             api_key=endpoint.api_key,
             base_url=endpoint.base_url,
