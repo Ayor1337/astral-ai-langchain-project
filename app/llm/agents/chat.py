@@ -365,8 +365,8 @@ async def build_chat_stream(
         ),
     )
     langchain_messages = to_langchain_messages(messages)
-    capture_updates = thinking_enabled or search_enabled
-    stream_mode: str | list[str] = ["messages", "updates"] if capture_updates else "messages"
+    trace_enable = thinking_enabled or search_enabled
+    stream_mode: str | list[str] = ["messages", "updates"] if trace_enable else "messages"
 
     async def iterator() -> AsyncIterator[ContentBlock | str]:
         """将 agent 流式事件转换为内容块异步迭代器。
@@ -379,7 +379,7 @@ async def build_chat_stream(
                 {"messages": langchain_messages},
                 stream_mode=stream_mode,
             ):
-                if capture_updates:
+                if trace_enable:
                     if isinstance(event, tuple) and len(event) == 2 and isinstance(event[0], str):
                         mode, payload = event
                     else:
