@@ -1,3 +1,6 @@
+import time
+from threading import Thread
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -166,6 +169,45 @@ def test_stream_chat_returns_stopped_done_status(client, monkeypatch):
     assert response.status_code == 200
     assert '"status":"stopped"' in body
     assert '"run_id":"run-1"' in body
+
+
+def test_stream_chat_emits_first_event_before_full_stream_finishes(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        yield ("conversation", {"conversation_id": "conv-1", "title": "新对话", "run_id": "run-1"})
+        await __import__("asyncio").sleep(0.2)
+        yield ("chunk", {"content": "你好"})
+        await __import__("asyncio").sleep(0.2)
+        yield ("done", {"status": "completed", "run_id": "run-1"})
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    observed: dict[str, object] = {}
+
+    def consume_stream() -> None:
+        with client.stream("POST", "/api/chat/stream", json={"message": "你好"}) as response:
+            observed["status_code"] = response.status_code
+            start = time.perf_counter()
+            lines = response.iter_lines()
+            observed["first_line"] = next(lines)
+            observed["first_line_elapsed"] = time.perf_counter() - start
+            observed["rest"] = list(lines)
+
+    worker = Thread(target=consume_stream)
+    start = time.perf_counter()
+    worker.start()
+    worker.join(timeout=0.15)
+
+    assert worker.is_alive(), "流消费线程应仍在等待后续事件，不能在 0.15s 内一次性完成"
+
+    worker.join(timeout=2)
+
+    assert worker.is_alive() is False
+    assert observed["status_code"] == 200
+    assert observed["first_line_elapsed"] < 0.15
+    assert observed["first_line"] == "event: conversation"
+    assert any(line == "event: chunk" for line in observed["rest"])
+    assert any(line == "event: done" for line in observed["rest"])
+    assert time.perf_counter() - start >= 0.35
 
 
 def test_stop_chat_run_returns_202(client, monkeypatch):

@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -47,20 +46,18 @@ async def test_build_chat_stream_emits_text_and_thinking_blocks():
             )
 
     with (
-        patch(
-            "app.llm.agents.chat.get_settings",
-            return_value=SimpleNamespace(
-                chat_endpoint=ModelEndpointSettings(
-                    provider="anthropic",
-                    api_key="chat-key",
-                    base_url=None,
-                    model="claude-chat-model",
-                )
-            ),
-        ),
         patch("app.llm.agents.chat.create_chat_agent", return_value=FakeAgent()),
     ):
-        stream = await build_chat_stream([ChatMessage(role="user", content="你好")], thinking_enabled=True)
+        stream = await build_chat_stream(
+            [ChatMessage(role="user", content="你好")],
+            endpoint=ModelEndpointSettings(
+                provider="anthropic",
+                api_key="chat-key",
+                base_url=None,
+                model="claude-chat-model",
+            ),
+            thinking_enabled=True,
+        )
         chunks = [chunk async for chunk in stream]
 
     assert chunks == [
@@ -87,20 +84,18 @@ async def test_build_chat_stream_passthroughs_custom_trace_blocks():
             )
 
     with (
-        patch(
-            "app.llm.agents.chat.get_settings",
-            return_value=SimpleNamespace(
-                chat_endpoint=ModelEndpointSettings(
-                    provider="anthropic",
-                    api_key="chat-key",
-                    base_url=None,
-                    model="claude-chat-model",
-                )
-            ),
-        ),
         patch("app.llm.agents.chat.create_chat_agent", return_value=FakeAgent()),
     ):
-        stream = await build_chat_stream([ChatMessage(role="user", content="查 IP")], thinking_enabled=True)
+        stream = await build_chat_stream(
+            [ChatMessage(role="user", content="查 IP")],
+            endpoint=ModelEndpointSettings(
+                provider="anthropic",
+                api_key="chat-key",
+                base_url=None,
+                model="claude-chat-model",
+            ),
+            thinking_enabled=True,
+        )
         chunks = [chunk async for chunk in stream]
 
     assert chunks == [{"type": "tool_call", "step_id": "tool-1", "tool_name": "web_search"}]
@@ -151,20 +146,18 @@ async def test_build_chat_stream_executes_add_tool_and_streams_final_text():
             )
 
     with (
-        patch(
-            "app.llm.agents.chat.get_settings",
-            return_value=SimpleNamespace(
-                chat_endpoint=ModelEndpointSettings(
-                    provider="anthropic",
-                    api_key="chat-key",
-                    base_url=None,
-                    model="claude-chat-model",
-                )
-            ),
-        ),
         patch("app.llm.agents.chat.create_chat_agent", return_value=FakeAgent()),
     ):
-        stream = await build_chat_stream([ChatMessage(role="user", content="2+3 等于几？")], thinking_enabled=True)
+        stream = await build_chat_stream(
+            [ChatMessage(role="user", content="2+3 等于几？")],
+            endpoint=ModelEndpointSettings(
+                provider="anthropic",
+                api_key="chat-key",
+                base_url=None,
+                model="claude-chat-model",
+            ),
+            thinking_enabled=True,
+        )
         chunks = [chunk async for chunk in stream]
 
     assert [chunk["type"] for chunk in chunks] == ["tool_call", "tool_result", "text"]

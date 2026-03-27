@@ -12,6 +12,15 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+For Codex sessions, do not assume a conversation thread will automatically inherit a previous
+`conda activate ...` state. If this project should run inside the `astral_ai` Conda
+environment, invoke commands explicitly with that environment, for example:
+
+```bash
+conda run -n astral_ai python -m pytest
+conda run -n astral_ai uvicorn app.main:app --reload
+```
+
 Run the API locally with auto-reload:
 
 ```bash

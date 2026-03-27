@@ -203,7 +203,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
@@ -232,7 +232,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         session_factory = FakeSessionFactory()
         release_first_chunk = asyncio.Event()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
@@ -286,7 +286,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         conversation = await repository.create_conversation(title="新对话")
         release_first_chunk = asyncio.Event()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
@@ -336,7 +336,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         await repository.add_message(conversation, role="user", content="上一轮问题")
         await repository.add_message(conversation, role="assistant", content="上一轮回答")
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
@@ -371,7 +371,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
@@ -401,7 +401,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
@@ -432,7 +432,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         title_started = asyncio.Event()
         release_title = asyncio.Event()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
@@ -481,7 +481,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         session_factory = FakeSessionFactory()
         release_first_chunk = asyncio.Event()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
@@ -529,7 +529,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         title_started = asyncio.Event()
         release_title = asyncio.Event()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
@@ -568,7 +568,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
@@ -599,7 +599,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertTrue(thinking_enabled)
             self.assertEqual([(message.role, message.content) for message in messages], [("user", "你好")])
 
@@ -655,7 +655,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         session_factory = FakeSessionFactory()
         release_first_chunk = asyncio.Event()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertTrue(thinking_enabled)
 
             async def iterator():
@@ -702,7 +702,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         session_factory = FakeSessionFactory()
         release_title = asyncio.Event()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertFalse(thinking_enabled)
 
             async def iterator():
@@ -736,7 +736,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertTrue(thinking_enabled)
 
             async def iterator():
@@ -784,7 +784,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertTrue(thinking_enabled)
 
             async def iterator():
@@ -814,7 +814,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertTrue(thinking_enabled)
 
             async def iterator():
@@ -848,7 +848,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertTrue(thinking_enabled)
 
             async def iterator():
@@ -877,7 +877,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertTrue(thinking_enabled)
 
             async def iterator():
@@ -910,7 +910,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertTrue(thinking_enabled)
 
             async def iterator():
@@ -952,7 +952,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         release_stream = asyncio.Event()
         stream_closed = asyncio.Event()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             self.assertTrue(thinking_enabled)
 
             async def iterator():
@@ -1004,7 +1004,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.services.chat_service.get_session_factory", return_value=session_factory),
             patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
             patch(
-                "app.services.chat_service.validate_chat_capabilities",
+                "app.services.chat_service.build_chat_stream",
                 side_effect=ThinkingNotSupportedError("provider openai does not support thinking"),
             ),
         ):
@@ -1020,7 +1020,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         stream_closed = asyncio.Event()
         release_stream = asyncio.Event()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             async def iterator():
                 try:
                     yield {"type": "text", "text": "部分回答", "index": 0}
@@ -1061,7 +1061,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         stream_closed = asyncio.Event()
         release_stream = asyncio.Event()
 
-        async def fake_build_chat_stream(messages, *, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
             async def iterator():
                 try:
                     await release_stream.wait()

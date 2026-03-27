@@ -9,13 +9,6 @@ class BaseChatProvider(Protocol):
     name: ProviderName
     supports_thinking: bool
 
-    def validate_chat_capabilities(
-        self,
-        *,
-        endpoint: ModelEndpointSettings,
-        thinking_enabled: bool = False,
-    ) -> None: ...
-
     def create_chat_model(
         self,
         *,
