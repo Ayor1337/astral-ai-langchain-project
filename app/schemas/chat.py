@@ -17,6 +17,7 @@ class ChatRequest(BaseModel):
     conversation_id: UUID | None = None
     message: str = Field(min_length=1)
     thinking_enabled: bool = False
+    search_enabled: bool = False
 
 
 class ChatRunStopResponse(BaseModel):

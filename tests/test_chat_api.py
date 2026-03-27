@@ -22,10 +22,11 @@ def test_stream_chat_returns_chunk_only_when_thinking_disabled(client, monkeypat
         assert request.conversation_id is None
         assert request.message == "你好"
         assert request.thinking_enabled is False
+        assert request.search_enabled is False
         yield ("conversation", {"conversation_id": "conv-1", "title": "新对话", "run_id": "run-1"})
         yield ("chunk", {"content": "你好"})
         yield ("chunk", {"content": "！"})
-        yield ("done", {"status": "completed", "run_id": "run-1"})
+        yield ("done", {"status": "completed", "run_id": "run-1", "sources": []})
 
     monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
 
@@ -149,6 +150,41 @@ def test_stream_chat_accepts_thinking_enabled(client, monkeypatch):
     assert response.status_code == 200
     assert "event: conversation" in body
     assert "event: done" in body
+
+
+def test_stream_chat_accepts_search_enabled_and_done_sources(client, monkeypatch):
+    async def fake_stream_chat_events(request):
+        assert request.search_enabled is True
+        yield ("conversation", {"conversation_id": "conv-1", "title": "新对话", "run_id": "run-1"})
+        yield ("chunk", {"content": "这里是答案[1]"})
+        yield (
+            "done",
+            {
+                "status": "completed",
+                "run_id": "run-1",
+                "sources": [
+                    {
+                        "index": 1,
+                        "title": "Astral AI",
+                        "url": "https://example.com/astral",
+                        "snippet": "Latest update",
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
+
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={"message": "Astral AI 最新消息", "search_enabled": True},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert '"search_enabled":true' not in body
+    assert '"sources":[{"index":1,"title":"Astral AI","url":"https://example.com/astral","snippet":"Latest update"}]' in body
 
 
 def test_stream_chat_returns_stopped_done_status(client, monkeypatch):

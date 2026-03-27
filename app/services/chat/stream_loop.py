@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
 from typing import Any, TypeAlias
@@ -57,6 +58,8 @@ async def build_stream_event_iterator(
             trace_order = 1
             next_thinking_step_index = 0
             assistant_text_chunks: list[str] = []
+            collected_sources: list[dict[str, str]] = []
+            seen_source_urls: set[str] = set()
             active_thinking_step_id: str | None = None
             title_event_emitted = False
             pending_chunk_task: asyncio.Task[object] | None = None
@@ -180,6 +183,12 @@ async def build_stream_event_iterator(
                     if block is None:
                         continue
                     block_type = block.get("type")
+                    if block_type == "search":
+                        _collect_search_sources(
+                            block,
+                            collected_sources=collected_sources,
+                            seen_source_urls=seen_source_urls,
+                        )
                     if block_type == "text":
                         if use_trace:
                             finalized_thinking = finalize_thinking_step(
@@ -275,6 +284,10 @@ async def build_stream_event_iterator(
                     {
                         "status": "stopped" if stopped else "completed",
                         "run_id": str(run_handle.run_id),
+                        "sources": _finalize_sources(
+                            collected_sources=collected_sources,
+                            assistant_content=assistant_content,
+                        ),
                     },
                 )
             except UpstreamServiceError as exc:
@@ -291,3 +304,72 @@ async def build_stream_event_iterator(
             finish_chat_run(run_handle.run_id)
 
     return iterator()
+
+
+def _collect_search_sources(
+    block: dict[str, object],
+    *,
+    collected_sources: list[dict[str, str]],
+    seen_source_urls: set[str],
+) -> None:
+    if block.get("status") != "success":
+        return
+    payload = block.get("payload")
+    if not isinstance(payload, dict):
+        return
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title")
+        url = item.get("url")
+        snippet = item.get("snippet")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        if not isinstance(url, str) or not url.strip() or url in seen_source_urls:
+            continue
+        if not isinstance(snippet, str):
+            snippet = ""
+        seen_source_urls.add(url)
+        collected_sources.append(
+            {
+                "title": title.strip(),
+                "url": url.strip(),
+                "snippet": snippet.strip(),
+            }
+        )
+
+
+def _finalize_sources(
+    *,
+    collected_sources: list[dict[str, str]],
+    assistant_content: str,
+) -> list[dict[str, object]]:
+    indexed_sources = [
+        {
+            "index": index,
+            **source,
+        }
+        for index, source in enumerate(collected_sources, start=1)
+    ]
+    if not indexed_sources:
+        return []
+
+    citation_indexes = _extract_citation_indexes(assistant_content, limit=len(indexed_sources))
+    if not citation_indexes:
+        return indexed_sources
+    return [indexed_sources[index - 1] for index in citation_indexes]
+
+
+def _extract_citation_indexes(text: str, *, limit: int) -> list[int]:
+    indexes: list[int] = []
+    seen: set[int] = set()
+    for match in re.finditer(r"\[(\d+)\]", text):
+        index = int(match.group(1))
+        if index < 1 or index > limit or index in seen:
+            continue
+        seen.add(index)
+        indexes.append(index)
+    return indexes

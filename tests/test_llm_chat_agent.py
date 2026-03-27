@@ -159,8 +159,123 @@ class ChatAgentStreamTests(unittest.IsolatedAsyncioTestCase):
         create_agent_mock.assert_called_once_with(
             endpoint=endpoint,
             thinking_enabled=True,
+            search_enabled=False,
         )
 
+    async def test_build_chat_stream_emits_search_blocks_when_search_enabled_without_thinking(self):
+        agent = FakeAgent(
+            [
+                (
+                    "updates",
+                    {
+                        "model": {
+                            "messages": [
+                                AIMessage(
+                                    content="",
+                                    tool_calls=[
+                                        {
+                                            "name": "web_search",
+                                            "args": {"query": "Astral AI 最新消息"},
+                                            "id": "search-1",
+                                        }
+                                    ],
+                                )
+                            ]
+                        }
+                    },
+                ),
+                (
+                    "updates",
+                    {
+                        "tools": {
+                            "messages": [
+                                ToolMessage(
+                                    content='{"query":"Astral AI 最新消息","results":[{"title":"Astral AI","url":"https://example.com/astral","snippet":"Latest update"}]}',
+                                    tool_call_id="search-1",
+                                    name="web_search",
+                                )
+                            ],
+                        }
+                    },
+                ),
+                (AIMessageChunk(content="这里是答案[1]"), {"langgraph_node": "model"}),
+            ]
+        )
+
+        with patch("app.llm.agents.chat.create_chat_agent", return_value=agent):
+            stream = await build_chat_stream(
+                [ChatMessage(role="user", content="Astral AI 最新消息")],
+                endpoint=fake_settings().chat_endpoint,
+                thinking_enabled=False,
+                search_enabled=True,
+            )
+            blocks = [block async for block in stream]
+
+        self.assertEqual(
+            blocks,
+            [
+                {
+                    "type": "search",
+                    "step_id": "search-1",
+                    "query": "Astral AI 最新消息",
+                    "status": "running",
+                    "kind": "result_list",
+                    "message": "正在联网搜索。",
+                },
+                {
+                    "type": "search",
+                    "step_id": "search-1",
+                    "query": "Astral AI 最新消息",
+                    "status": "success",
+                    "kind": "result_list",
+                    "result_count": 1,
+                    "payload": {
+                        "results": [
+                            {
+                                "title": "Astral AI",
+                                "url": "https://example.com/astral",
+                                "snippet": "Latest update",
+                            }
+                        ]
+                    },
+                },
+                {"type": "text", "text": "这里是答案[1]", "index": 0},
+            ],
+        )
+
+    async def test_build_chat_stream_does_not_treat_tool_message_as_text_chunk(self):
+        agent = FakeAgent(
+            [
+                (
+                    "messages",
+                    (
+                        ToolMessage(
+                            content='{"query":"1000日元兑换人民币汇率","results":[{"title":"1000日元等于多少人民币 - IP.cn","url":"https://www.ip.cn:8443/huilv/JPY-CNY/1000.html","snippet":"1000日元=44.683人民币"}]}',
+                            tool_call_id="search-1",
+                            name="web_search",
+                        ),
+                        {"langgraph_node": "tools"},
+                    ),
+                ),
+                ("messages", (AIMessageChunk(content="1000日元约合人民币 44.68 元。[1]"), {"langgraph_node": "model"})),
+            ]
+        )
+
+        with patch("app.llm.agents.chat.create_chat_agent", return_value=agent):
+            stream = await build_chat_stream(
+                [ChatMessage(role="user", content="1000日元兑换人民币汇率")],
+                endpoint=fake_settings().chat_endpoint,
+                thinking_enabled=False,
+                search_enabled=True,
+            )
+            blocks = [block async for block in stream]
+
+        self.assertEqual(
+            blocks,
+            [
+                {"type": "text", "text": "1000日元约合人民币 44.68 元。[1]", "index": 0},
+            ],
+        )
 
 if __name__ == "__main__":
     unittest.main()

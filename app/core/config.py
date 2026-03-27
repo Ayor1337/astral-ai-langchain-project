@@ -1,9 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 import os
 from pathlib import Path
 
 SUPPORTED_PROVIDERS = ("anthropic", "openai")
+SUPPORTED_SEARCH_PROVIDERS = ("tavily",)
 
 
 class ConfigurationError(Exception):
@@ -19,12 +20,22 @@ class ModelEndpointSettings:
 
 
 @dataclass(frozen=True)
+class SearchSettings:
+    provider: str = "tavily"
+    api_key: str = ""
+    base_url: str = "https://api.tavily.com"
+    timeout_seconds: int = 8
+    max_results: int = 5
+
+
+@dataclass(frozen=True)
 class Settings:
     chat_endpoint: ModelEndpointSettings
     title_agent_endpoint: ModelEndpointSettings | None
     database_url: str
     memory_window_size: int
     memory_summary_trigger: int
+    search: SearchSettings = field(default_factory=SearchSettings)
 
 
 def _load_dotenv_values() -> dict[str, str]:
@@ -100,6 +111,17 @@ def _build_optional_endpoint_settings(prefix: str) -> ModelEndpointSettings | No
     )
 
 
+def _build_search_settings() -> SearchSettings:
+    """组装联网搜索配置，未配置字段使用 Tavily 的安全默认值。"""
+    return SearchSettings(
+        provider=_get_setting_value("SEARCH_PROVIDER", "tavily"),
+        api_key=_get_setting_value("SEARCH_API_KEY"),
+        base_url=_get_setting_value("SEARCH_BASE_URL", "https://api.tavily.com"),
+        timeout_seconds=_get_int_setting("SEARCH_TIMEOUT_SECONDS", 8),
+        max_results=_get_int_setting("SEARCH_MAX_RESULTS", 5),
+    )
+
+
 def _validate_endpoint_settings(prefix: str, endpoint: ModelEndpointSettings) -> ModelEndpointSettings:
     """归一化端点配置，并提前拒绝 provider、模型和 URL 的无效组合。"""
     provider = endpoint.provider.strip().lower()
@@ -125,6 +147,33 @@ def _validate_endpoint_settings(prefix: str, endpoint: ModelEndpointSettings) ->
         api_key=api_key,
         base_url=base_url or None,
         model=model,
+    )
+
+
+def _validate_search_settings(search: SearchSettings) -> SearchSettings:
+    """校验搜索配置，但不要求功能启用前必须配置 API Key。"""
+    provider = search.provider.strip().lower()
+    if provider not in SUPPORTED_SEARCH_PROVIDERS:
+        raise ConfigurationError(
+            f"SEARCH_PROVIDER must be one of: {', '.join(SUPPORTED_SEARCH_PROVIDERS)}"
+        )
+
+    base_url = search.base_url.strip()
+    if not base_url.startswith(("http://", "https://")):
+        raise ConfigurationError("SEARCH_BASE_URL must start with http:// or https://")
+
+    if search.timeout_seconds <= 0:
+        raise ConfigurationError("SEARCH_TIMEOUT_SECONDS must be greater than 0")
+
+    if search.max_results <= 0:
+        raise ConfigurationError("SEARCH_MAX_RESULTS must be greater than 0")
+
+    return SearchSettings(
+        provider=provider,
+        api_key=search.api_key.strip(),
+        base_url=base_url.rstrip("/"),
+        timeout_seconds=search.timeout_seconds,
+        max_results=search.max_results,
     )
 
 
@@ -158,6 +207,7 @@ def validate_settings(settings: Settings) -> Settings:
         database_url=settings.database_url,
         memory_window_size=settings.memory_window_size,
         memory_summary_trigger=settings.memory_summary_trigger,
+        search=_validate_search_settings(settings.search),
     )
 
 
@@ -171,5 +221,6 @@ def get_settings() -> Settings:
         database_url=_get_setting_value("DATABASE_URL"),
         memory_window_size=_get_int_setting("MEMORY_WINDOW_SIZE", 8),
         memory_summary_trigger=_get_int_setting("MEMORY_SUMMARY_TRIGGER", 12),
+        search=_build_search_settings(),
     )
     return validate_settings(settings)

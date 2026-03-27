@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.core.config import ModelEndpointSettings
+from app.core.config import ConfigurationError, ModelEndpointSettings, SearchSettings
 from app.llm.agents.chat import validate_chat_capabilities
 from app.llm.exceptions import ThinkingNotSupportedError
 from app.llm.models.factory import create_chat_model
@@ -69,3 +69,25 @@ def test_validate_chat_capabilities_rejects_thinking_for_openai():
 
     with pytest.raises(ThinkingNotSupportedError, match="provider openai does not support thinking"):
         validate_chat_capabilities(endpoint=endpoint, thinking_enabled=True)
+
+
+def test_validate_chat_capabilities_rejects_missing_search_api_key_when_search_enabled():
+    endpoint = ModelEndpointSettings(
+        provider="anthropic",
+        api_key="test-key",
+        base_url=None,
+        model="claude-3-5-sonnet",
+    )
+
+    with pytest.raises(ConfigurationError, match="SEARCH_API_KEY is not configured"):
+        validate_chat_capabilities(
+            endpoint=endpoint,
+            search_enabled=True,
+            search=SearchSettings(
+                provider="tavily",
+                api_key="",
+                base_url="https://api.tavily.com",
+                timeout_seconds=8,
+                max_results=5,
+            ),
+        )
