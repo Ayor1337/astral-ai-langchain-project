@@ -9,7 +9,10 @@ TRACE_STEP_STATUSES = {"pending", "running", "success", "error", "skipped"}
 
 
 def utcnow_iso() -> str:
-    """为 trace 事件统一生成 ISO 格式 UTC 时间戳。"""
+    """为 trace 事件统一生成 ISO 格式 UTC 时间戳。
+
+    确保前端和持久化层使用同一时间格式。
+    """
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -17,7 +20,10 @@ def merge_trace_step(
     trace_state: dict[str, TraceStep],
     step_update: TraceStep,
 ) -> TraceStep:
-    """按 step_id 合并增量 trace，保留流式更新的最后状态。"""
+    """按 step_id 合并增量 trace，保留流式更新的最后状态。
+
+    适用于同一步骤多次增量上报的场景。
+    """
     step_id = str(step_update.get("step_id", ""))
     if not step_id:
         return step_update
@@ -41,7 +47,10 @@ def merge_trace_step(
 
 
 def coerce_stream_block(chunk: object) -> dict[str, object] | None:
-    """兼容字符串块和结构化块，统一为字典格式继续处理。"""
+    """兼容字符串块和结构化块，统一为字典格式继续处理。
+
+    把不同 provider 的输出收敛到同一处理路径。
+    """
     if isinstance(chunk, str):
         if not chunk:
             return None
@@ -52,14 +61,20 @@ def coerce_stream_block(chunk: object) -> dict[str, object] | None:
 
 
 def _normalize_trace_status(raw_status: object) -> str:
-    """将未知状态收敛为 running，避免前端收到不稳定枚举。"""
+    """将未知状态收敛为 running，避免前端收到不稳定枚举。
+
+    未知值一律按进行中处理。
+    """
     if isinstance(raw_status, str) and raw_status in TRACE_STEP_STATUSES:
         return raw_status
     return "running"
 
 
 def _resolve_trace_step_id(block: dict[str, object], *, step_type: str, fallback_order: int) -> str:
-    """尽量复用上游 step_id；缺失时按类型和顺序生成稳定降级 ID。"""
+    """尽量复用上游 step_id；缺失时按类型和顺序生成稳定降级 ID。
+
+    这样同一步骤在流式过程中不会频繁变更标识。
+    """
     raw_step_id = block.get("step_id")
     if raw_step_id:
         return str(raw_step_id).strip()
@@ -74,7 +89,10 @@ def ensure_local_thinking_step_id(
     active_thinking_step_id: str | None,
     next_thinking_step_index: int,
 ) -> tuple[dict[str, object], int]:
-    """为没有上游 step_id 的 thinking 块分配本地递增 ID。"""
+    """为没有上游 step_id 的 thinking 块分配本地递增 ID。
+
+    保证同一轮思考块可以稳定合并。
+    """
     if block.get("type") != "thinking" or block.get("step_id"):
         return block, next_thinking_step_index
 
@@ -92,7 +110,10 @@ def build_trace_step_from_block(
     *,
     fallback_order: int,
 ) -> TraceStep:
-    """把 provider 返回的块标准化为统一 trace_step 结构。"""
+    """把 provider 返回的块标准化为统一 trace_step 结构。
+
+    只保留前端和落库真正需要的字段。
+    """
     raw_type = block.get("type")
     step_type = str(raw_type) if isinstance(raw_type, str) else "other"
     if step_type not in TRACE_BLOCK_TYPES:
@@ -147,7 +168,10 @@ def serialize_trace_steps(
     *,
     finalize_running: bool,
 ) -> list[TraceStep] | None:
-    """在落库前按顺序序列化 trace，并可将残留 running 步骤收口为 success。"""
+    """在落库前按顺序序列化 trace，并可将残留 running 步骤收口为 success。
+
+    用于把流式状态转换成最终可保存结果。
+    """
     if not trace_state:
         return None
 
@@ -172,7 +196,10 @@ def finalize_thinking_step(
     trace_state: dict[str, TraceStep],
     active_thinking_step_id: str | None,
 ) -> TraceStep | None:
-    """在文本输出开始或结束时关闭当前 thinking 步骤，避免悬挂状态。"""
+    """在文本输出开始或结束时关闭当前 thinking 步骤，避免悬挂状态。
+
+    当思考块没有继续增量时，将其收口为完成态。
+    """
     if not active_thinking_step_id:
         return None
 

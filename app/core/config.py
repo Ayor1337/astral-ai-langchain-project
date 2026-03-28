@@ -1,9 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 import os
 from pathlib import Path
 
 SUPPORTED_PROVIDERS = ("anthropic", "openai")
+SUPPORTED_SEARCH_PROVIDERS = ("tavily",)
 
 
 class ConfigurationError(Exception):
@@ -19,16 +20,30 @@ class ModelEndpointSettings:
 
 
 @dataclass(frozen=True)
+class SearchSettings:
+    provider: str = "tavily"
+    api_key: str = ""
+    base_url: str = "https://api.tavily.com"
+    timeout_seconds: int = 8
+    max_results: int = 5
+
+
+@dataclass(frozen=True)
 class Settings:
     chat_endpoint: ModelEndpointSettings
     title_agent_endpoint: ModelEndpointSettings | None
     database_url: str
     memory_window_size: int
     memory_summary_trigger: int
+    search: SearchSettings = field(default_factory=SearchSettings)
 
 
 def _load_dotenv_values() -> dict[str, str]:
-    """从当前工作目录读取 .env，作为进程环境变量的回退来源。"""
+    """读取当前工作目录下的 `.env` 文件。
+
+    Returns:
+        按键值对解析后的环境变量回退值。
+    """
     env_path = Path.cwd() / ".env"
     if not env_path.exists():
         return {}
@@ -46,7 +61,15 @@ def _load_dotenv_values() -> dict[str, str]:
 
 
 def _get_setting_value(name: str, default: str = "") -> str:
-    """优先读取进程环境变量，其次读取 .env，最后回退到默认值。"""
+    """读取配置值，按环境变量、`.env` 和默认值的顺序回退。
+
+    Args:
+        name: 配置项名称。
+        default: 未命中时使用的默认值。
+
+    Returns:
+        解析后的配置字符串。
+    """
     env_value = os.getenv(name)
     if env_value is not None:
         return env_value.strip()
@@ -59,7 +82,18 @@ def _get_setting_value(name: str, default: str = "") -> str:
 
 
 def _get_int_setting(name: str, default: int) -> int:
-    """将字符串配置转换为整数，并在格式错误时抛出稳定的配置异常。"""
+    """读取整数配置并在格式错误时失败。
+
+    Args:
+        name: 配置项名称。
+        default: 未命中时使用的默认值。
+
+    Returns:
+        解析后的整数值。
+
+    Raises:
+        ConfigurationError: 配置值无法转换为整数时抛出。
+    """
     raw_value = _get_setting_value(name, str(default))
     try:
         return int(raw_value)
@@ -68,7 +102,15 @@ def _get_int_setting(name: str, default: int) -> int:
 
 
 def _build_endpoint_settings(prefix: str, fallback: ModelEndpointSettings | None = None) -> ModelEndpointSettings:
-    """按前缀组装端点配置，并在需要时继承回退端点的缺省值。"""
+    """按前缀组装模型端点配置。
+
+    Args:
+        prefix: 环境变量前缀。
+        fallback: 可选的回退端点配置。
+
+    Returns:
+        组装后的端点配置。
+    """
     provider = _get_setting_value(f"{prefix}_PROVIDER") or (fallback.provider if fallback else "")
     api_key = _get_setting_value(f"{prefix}_API_KEY") or (fallback.api_key if fallback else "")
     raw_base_url = _get_setting_value(f"{prefix}_BASE_URL")
@@ -83,7 +125,14 @@ def _build_endpoint_settings(prefix: str, fallback: ModelEndpointSettings | None
 
 
 def _build_optional_endpoint_settings(prefix: str) -> ModelEndpointSettings | None:
-    """仅当对应前缀至少配置了一个字段时，才视为启用可选端点。"""
+    """按前缀构建可选模型端点配置。
+
+    Args:
+        prefix: 环境变量前缀。
+
+    Returns:
+        启用时返回端点配置，否则返回 `None`。
+    """
     raw_values = {
         "provider": _get_setting_value(f"{prefix}_PROVIDER"),
         "api_key": _get_setting_value(f"{prefix}_API_KEY"),
@@ -100,8 +149,34 @@ def _build_optional_endpoint_settings(prefix: str) -> ModelEndpointSettings | No
     )
 
 
+def _build_search_settings() -> SearchSettings:
+    """组装联网搜索配置。
+
+    Returns:
+        归一化后的搜索配置。
+    """
+    return SearchSettings(
+        provider=_get_setting_value("SEARCH_PROVIDER", "tavily"),
+        api_key=_get_setting_value("SEARCH_API_KEY"),
+        base_url=_get_setting_value("SEARCH_BASE_URL", "https://api.tavily.com"),
+        timeout_seconds=_get_int_setting("SEARCH_TIMEOUT_SECONDS", 8),
+        max_results=_get_int_setting("SEARCH_MAX_RESULTS", 5),
+    )
+
+
 def _validate_endpoint_settings(prefix: str, endpoint: ModelEndpointSettings) -> ModelEndpointSettings:
-    """归一化端点配置，并提前拒绝 provider、模型和 URL 的无效组合。"""
+    """校验并归一化模型端点配置。
+
+    Args:
+        prefix: 环境变量前缀。
+        endpoint: 待校验的端点配置。
+
+    Returns:
+        归一化后的端点配置。
+
+    Raises:
+        ConfigurationError: 端点配置不合法时抛出。
+    """
     provider = endpoint.provider.strip().lower()
     if provider not in SUPPORTED_PROVIDERS:
         raise ConfigurationError(
@@ -128,8 +203,55 @@ def _validate_endpoint_settings(prefix: str, endpoint: ModelEndpointSettings) ->
     )
 
 
+def _validate_search_settings(search: SearchSettings) -> SearchSettings:
+    """校验并归一化搜索配置。
+
+    Args:
+        search: 待校验的搜索配置。
+
+    Returns:
+        归一化后的搜索配置。
+
+    Raises:
+        ConfigurationError: 搜索配置不合法时抛出。
+    """
+    provider = search.provider.strip().lower()
+    if provider not in SUPPORTED_SEARCH_PROVIDERS:
+        raise ConfigurationError(
+            f"SEARCH_PROVIDER must be one of: {', '.join(SUPPORTED_SEARCH_PROVIDERS)}"
+        )
+
+    base_url = search.base_url.strip()
+    if not base_url.startswith(("http://", "https://")):
+        raise ConfigurationError("SEARCH_BASE_URL must start with http:// or https://")
+
+    if search.timeout_seconds <= 0:
+        raise ConfigurationError("SEARCH_TIMEOUT_SECONDS must be greater than 0")
+
+    if search.max_results <= 0:
+        raise ConfigurationError("SEARCH_MAX_RESULTS must be greater than 0")
+
+    return SearchSettings(
+        provider=provider,
+        api_key=search.api_key.strip(),
+        base_url=base_url.rstrip("/"),
+        timeout_seconds=search.timeout_seconds,
+        max_results=search.max_results,
+    )
+
+
 def validate_settings(settings: Settings) -> Settings:
-    """对完整配置做跨字段校验，保证运行期读取到的是稳定配置对象。"""
+    """校验完整配置并返回规范化结果。
+
+    Args:
+        settings: 待校验的完整配置对象。
+
+    Returns:
+        通过校验后的配置对象。
+
+    Raises:
+        ConfigurationError: 任一跨字段约束不满足时抛出。
+    """
     chat_endpoint = _validate_endpoint_settings("LLM", settings.chat_endpoint)
     title_agent_endpoint = (
         _validate_endpoint_settings("TITLE_AGENT", settings.title_agent_endpoint)
@@ -158,12 +280,17 @@ def validate_settings(settings: Settings) -> Settings:
         database_url=settings.database_url,
         memory_window_size=settings.memory_window_size,
         memory_summary_trigger=settings.memory_summary_trigger,
+        search=_validate_search_settings(settings.search),
     )
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """缓存配置对象，避免每次请求都重复解析环境变量。"""
+    """读取并缓存完整配置对象。
+
+    Returns:
+        已校验的配置对象。
+    """
     chat_endpoint = _build_endpoint_settings("LLM")
     settings = Settings(
         chat_endpoint=chat_endpoint,
@@ -171,5 +298,6 @@ def get_settings() -> Settings:
         database_url=_get_setting_value("DATABASE_URL"),
         memory_window_size=_get_int_setting("MEMORY_WINDOW_SIZE", 8),
         memory_summary_trigger=_get_int_setting("MEMORY_SUMMARY_TRIGGER", 12),
+        search=_build_search_settings(),
     )
     return validate_settings(settings)

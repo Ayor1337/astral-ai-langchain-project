@@ -9,7 +9,17 @@ _PROVIDERS: dict[str, BaseChatProvider] = {
 
 
 def get_provider(name: str) -> BaseChatProvider:
-    """按名称解析 provider，统一在这里做大小写归一化。"""
+    """按名称解析 provider。
+
+    Args:
+        name: provider 名称，大小写不敏感。
+
+    Returns:
+        匹配到的 provider 实例。
+
+    Raises:
+        ValueError: 当名称不受支持时抛出。
+    """
     provider = _PROVIDERS.get(name.strip().lower())
     if provider is None:
         raise ValueError(f"unsupported provider: {name}")

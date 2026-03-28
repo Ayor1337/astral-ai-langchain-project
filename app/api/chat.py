@@ -18,13 +18,28 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
 def _format_sse(event: str, payload: dict[str, Any]) -> str:
-    """将事件序列化为前端可直接消费的 SSE 文本格式。"""
+    """将事件和载荷序列化为 SSE 文本。
+
+    Args:
+        event: SSE 事件名。
+        payload: 事件载荷。
+
+    Returns:
+        可直接写入响应体的 SSE 文本。
+    """
     data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     return f"event: {event}\ndata: {data}\n\n"
 
 
 async def _resolve_stream(request: ChatRequest) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-    """兼容同步返回迭代器和异步返回迭代器的服务层实现。"""
+    """解析聊天流返回值，兼容同步和异步两种服务层实现。
+
+    Args:
+        request: 聊天请求体。
+
+    Returns:
+        归一化后的异步事件迭代器。
+    """
     stream_or_iterator = stream_chat_events(request)
     if inspect.isawaitable(stream_or_iterator):
         return await stream_or_iterator
@@ -52,6 +67,14 @@ async def _resolve_stream(request: ChatRequest) -> AsyncIterator[tuple[str, dict
     },
 )
 async def stream_chat(request: ChatRequest) -> StreamingResponse:
+    """创建聊天流响应，并把上游错误转换为稳定的 HTTP 状态码。
+
+    Args:
+        request: 聊天请求体。
+
+    Returns:
+        以 SSE 形式返回的流式响应。
+    """
     try:
         # 先拉取首个事件，确保在真正建立 SSE 响应前就能把配置/会话类错误转成 HTTP 状态码。
         stream = await _resolve_stream(request)
@@ -68,6 +91,11 @@ async def stream_chat(request: ChatRequest) -> StreamingResponse:
         raise HTTPException(status_code=502, detail="chat stream produced no events")
 
     async def event_stream():
+        """按 SSE 格式逐条输出首个事件和后续事件。
+
+        Returns:
+            逐条产出 SSE 字符串的异步生成器。
+        """
         first_name, first_payload = first_event
         yield _format_sse(first_name, first_payload)
         async for event, payload in stream:
@@ -88,7 +116,14 @@ async def stream_chat(request: ChatRequest) -> StreamingResponse:
     },
 )
 async def stop_chat_run(run_id: UUID) -> ChatRunStopResponse:
-    """按运行句柄请求停止，具体终止由流式循环自行感知并收尾。"""
+    """按运行句柄请求停止一个聊天流。
+
+    Args:
+        run_id: 聊天运行 ID。
+
+    Returns:
+        终止请求的标准响应。
+    """
     try:
         payload = await request_stop_chat_run(run_id)
     except ChatRunNotFoundError as exc:

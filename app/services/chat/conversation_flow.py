@@ -23,7 +23,10 @@ async def get_or_create_conversation(
     session_factory: Any,
     repository_factory: Callable[[Any], Any],
 ) -> Any:
-    """加载已有会话，或在旧调用路径下隐式创建会话。"""
+    """加载已有会话，或在旧调用路径下隐式创建会话。
+
+    兼容没有 `conversation_id` 的旧入口。
+    """
     async with session_factory() as session:
         repository = repository_factory(session)
         if request.conversation_id is None:
@@ -44,7 +47,10 @@ async def prepare_chat_context(
     session_factory: Any,
     repository_factory: Callable[[Any], Any],
 ) -> PreparedChatContext:
-    """持久化当前用户消息，并构建发送给模型的上下文消息。"""
+    """持久化当前用户消息，并构建发送给模型的上下文消息。
+
+    同时决定当前轮是否需要异步生成标题。
+    """
     async with session_factory() as session:
         repository = repository_factory(session)
         current_conversation = await repository.get_conversation(conversation.id)

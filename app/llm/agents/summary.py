@@ -19,7 +19,14 @@ def create_summary_agent(
     *,
     endpoint: ModelEndpointSettings,
 ):
-    """创建专用于摘要压缩的无工具 agent。"""
+    """创建专用于摘要压缩的无工具 agent。
+
+    Args:
+        endpoint: 模型端点配置。
+
+    Returns:
+        可用于生成摘要的 LangChain agent。
+    """
     model = create_chat_model(
         endpoint=endpoint,
         streaming=False,
@@ -34,7 +41,14 @@ def create_summary_agent(
 
 
 def _extract_summary_text(result: object) -> str:
-    """兼容 agent 返回 dict 和消息对象两种结果结构。"""
+    """从 agent 结果中提取摘要文本。
+
+    Args:
+        result: agent 返回结果。
+
+    Returns:
+        提取到的摘要文本；未命中时返回空字符串。
+    """
     if isinstance(result, dict):
         messages = result.get("messages")
         if isinstance(messages, list):
@@ -54,7 +68,15 @@ async def generate_summary(
     previous_summary: str | None,
     messages: Sequence[ChatMessage],
 ) -> str:
-    """基于旧摘要和新增消息生成新的摘要文本。"""
+    """基于旧摘要和新增消息生成新的摘要文本。
+
+    Args:
+        previous_summary: 现有摘要。
+        messages: 需要压缩的新消息序列。
+
+    Returns:
+        更新后的摘要文本。
+    """
     if not messages:
         return previous_summary or ""
 

@@ -21,6 +21,14 @@ def create_title_agent(
     *,
     endpoint: ModelEndpointSettings,
 ):
+    """创建专用于标题生成的无工具 agent。
+
+    Args:
+        endpoint: 模型端点配置。
+
+    Returns:
+        可用于生成会话标题的 LangChain agent。
+    """
     model = create_chat_model(
         endpoint=endpoint,
         streaming=False,
@@ -35,6 +43,14 @@ def create_title_agent(
 
 
 def _extract_title_text(result: object) -> str:
+    """从标题 agent 结果中提取文本。
+
+    Args:
+        result: agent 返回结果。
+
+    Returns:
+        提取到的标题文本；未命中时返回空字符串。
+    """
     if isinstance(result, dict):
         messages = result.get("messages")
         if isinstance(messages, list):
@@ -50,6 +66,14 @@ def _extract_title_text(result: object) -> str:
 
 
 def _strip_surrounding_quotes(value: str) -> str:
+    """去除标题两端可能出现的成对引号。
+
+    Args:
+        value: 原始标题文本。
+
+    Returns:
+        去除外层引号后的文本。
+    """
     quote_pairs = [
         ('"', '"'),
         ("'", "'"),
@@ -74,6 +98,14 @@ def _strip_surrounding_quotes(value: str) -> str:
 
 
 def _normalize_title(raw_title: str) -> str:
+    """规范化标题文本并回退默认标题。
+
+    Args:
+        raw_title: 模型返回的原始标题。
+
+    Returns:
+        规范化后的标题，必要时回退到默认标题。
+    """
     normalized = raw_title.strip().splitlines()[0].strip() if raw_title.strip() else ""
     for prefix in ("标题：", "标题:", "title:", "Title:"):
         if normalized.startswith(prefix):
@@ -85,6 +117,14 @@ def _normalize_title(raw_title: str) -> str:
 
 
 def _resolve_title_agent_endpoint() -> ModelEndpointSettings:
+    """解析标题 agent 所使用的模型端点配置。
+
+    Returns:
+        标题生成专用的模型端点配置。
+
+    Raises:
+        ConfigurationError: 当标题 agent 配置缺失时抛出。
+    """
     endpoint = get_settings().title_agent_endpoint
     if endpoint is None:
         raise ConfigurationError("TITLE_AGENT_API_KEY is not configured")
@@ -95,6 +135,17 @@ async def generate_conversation_title(
     *,
     user_message: str,
 ) -> str:
+    """基于用户首条消息生成会话标题。
+
+    Args:
+        user_message: 用户的首条消息内容。
+
+    Returns:
+        规范化后的会话标题。
+
+    Raises:
+        UpstreamServiceError: 当上游标题生成失败时抛出。
+    """
     prompt = (
         "请基于以下用户首条消息生成标题。\n\n"
         f"用户：{user_message}\n"

@@ -41,6 +41,7 @@ def fake_settings(*, provider: str = "anthropic") -> SimpleNamespace:
             base_url=None,
             model="test-model",
         ),
+        search=None,
     )
 
 
@@ -203,8 +204,9 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeRepository()
         session_factory = FakeSessionFactory()
 
-        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False):
+        async def fake_build_chat_stream(messages, *, endpoint=None, thinking_enabled=False, search_enabled=False):
             self.assertFalse(thinking_enabled)
+            self.assertFalse(search_enabled)
 
             async def iterator():
                 yield {"type": "search", "step_id": "ignored-search", "query": "不应透出"}
@@ -226,6 +228,136 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([name for name, _ in events], ["conversation", "chunk", "chunk", "done"])
         self.assertEqual(repository.messages[1].content, "你好！ 我在。")
         self.assertIsNone(repository.messages[1].trace_steps)
+
+    async def test_search_enabled_collects_sources_into_done_event(self):
+        repository = FakeRepository()
+        session_factory = FakeSessionFactory()
+        settings = fake_settings()
+        settings.search = SimpleNamespace(
+            provider="tavily",
+            api_key="search-key",
+            base_url="https://api.tavily.com",
+            timeout_seconds=8,
+            max_results=5,
+        )
+
+        async def fake_build_chat_stream(
+            messages,
+            *,
+            endpoint=None,
+            thinking_enabled=False,
+            search_enabled=False,
+            search=None,
+        ):
+            self.assertFalse(thinking_enabled)
+            self.assertTrue(search_enabled)
+            self.assertIsNotNone(search)
+
+            async def iterator():
+                yield {
+                    "type": "search",
+                    "step_id": "search-1",
+                    "query": "Astral AI 最新消息",
+                    "status": "success",
+                    "kind": "result_list",
+                    "payload": {
+                        "results": [
+                            {
+                                "title": "Astral AI",
+                                "url": "https://example.com/astral",
+                                "snippet": "Latest update",
+                            }
+                        ]
+                    },
+                }
+                yield {"type": "text", "text": "这里是答案[1]", "index": 0}
+
+            return iterator()
+
+        with (
+            patch("app.services.chat_service.get_settings", return_value=settings),
+            patch("app.services.chat_service.get_session_factory", return_value=session_factory),
+            patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
+            patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
+            patch("app.services.chat_service.refresh_summary_if_needed", new=AsyncMock()),
+        ):
+            stream = await stream_chat_events(
+                ChatRequest(message="Astral AI 最新消息", thinking_enabled=False, search_enabled=True)
+            )
+            events = [event async for event in stream]
+
+        self.assertEqual(events[-1][0], "done")
+        self.assertEqual(
+            events[-1][1]["sources"],
+            [
+                {
+                    "index": 1,
+                    "title": "Astral AI",
+                    "url": "https://example.com/astral",
+                    "snippet": "Latest update",
+                }
+            ],
+        )
+
+    async def test_search_enabled_returns_empty_sources_when_answer_has_no_citation(self):
+        repository = FakeRepository()
+        session_factory = FakeSessionFactory()
+        settings = fake_settings()
+        settings.search = SimpleNamespace(
+            provider="tavily",
+            api_key="search-key",
+            base_url="https://api.tavily.com",
+            timeout_seconds=8,
+            max_results=5,
+        )
+
+        async def fake_build_chat_stream(
+            messages,
+            *,
+            endpoint=None,
+            thinking_enabled=False,
+            search_enabled=False,
+            search=None,
+        ):
+            self.assertFalse(thinking_enabled)
+            self.assertTrue(search_enabled)
+            self.assertIsNotNone(search)
+
+            async def iterator():
+                yield {
+                    "type": "search",
+                    "step_id": "search-1",
+                    "query": "Astral AI 最新消息",
+                    "status": "success",
+                    "kind": "result_list",
+                    "payload": {
+                        "results": [
+                            {
+                                "title": "Astral AI",
+                                "url": "https://example.com/astral",
+                                "snippet": "Latest update",
+                            }
+                        ]
+                    },
+                }
+                yield {"type": "text", "text": "这里是没有引用编号的答案。", "index": 0}
+
+            return iterator()
+
+        with (
+            patch("app.services.chat_service.get_settings", return_value=settings),
+            patch("app.services.chat_service.get_session_factory", return_value=session_factory),
+            patch("app.services.chat_service.ConversationRepository", side_effect=lambda session: repository),
+            patch("app.services.chat_service.build_chat_stream", side_effect=fake_build_chat_stream),
+            patch("app.services.chat_service.refresh_summary_if_needed", new=AsyncMock()),
+        ):
+            stream = await stream_chat_events(
+                ChatRequest(message="Astral AI 最新消息", thinking_enabled=False, search_enabled=True)
+            )
+            events = [event async for event in stream]
+
+        self.assertEqual(events[-1][0], "done")
+        self.assertEqual(events[-1][1]["sources"], [])
 
     async def test_first_round_generates_conversation_title_event_and_persists_title(self):
         repository = FakeRepository()
@@ -992,7 +1124,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             ["running"],
         )
         self.assertEqual(events[-2], ("trace_done", {"status": "stopped"}))
-        self.assertEqual(events[-1], ("done", {"status": "stopped", "run_id": run_id}))
+        self.assertEqual(events[-1], ("done", {"status": "stopped", "run_id": run_id, "sources": []}))
         self.assertEqual(len(repository.messages), 1)
 
     async def test_thinking_enabled_unsupported_provider_raises_before_stream_consumption(self):
@@ -1052,7 +1184,7 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(stream_closed.wait(), timeout=1)
 
         self.assertEqual(stop_response, {"run_id": run_id, "status": "stop_requested"})
-        self.assertEqual(events[-1], ("done", {"status": "stopped", "run_id": run_id}))
+        self.assertEqual(events[-1], ("done", {"status": "stopped", "run_id": run_id, "sources": []}))
         self.assertEqual(repository.messages[1].content, "部分回答")
 
     async def test_stop_request_before_first_chunk_keeps_only_user_message(self):
@@ -1092,7 +1224,13 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(consumer, timeout=1)
             await asyncio.wait_for(stream_closed.wait(), timeout=1)
 
-        self.assertEqual(events, [("conversation", events[0][1]), ("done", {"status": "stopped", "run_id": run_id})])
+        self.assertEqual(
+            events,
+            [
+                ("conversation", events[0][1]),
+                ("done", {"status": "stopped", "run_id": run_id, "sources": []}),
+            ],
+        )
         self.assertEqual(len(repository.messages), 1)
 
 
