@@ -51,6 +51,8 @@ class TavilySearchService:
             return {"query": query, "results": [], "error": "search request timed out"}
         except httpx.HTTPError as exc:
             return {"query": query, "results": [], "error": f"search request failed: {exc}"}
+        except ValueError:
+            return {"query": query, "results": [], "error": "search response was invalid"}
 
         return {
             "query": query,

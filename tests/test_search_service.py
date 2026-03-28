@@ -74,3 +74,26 @@ async def test_tavily_search_service_degrades_on_timeout():
     assert result["query"] == "Astral AI 最新消息"
     assert result["results"] == []
     assert result["error"] == "search request timed out"
+
+
+@pytest.mark.anyio
+async def test_tavily_search_service_degrades_when_response_json_is_invalid():
+    response = AsyncMock()
+    response.raise_for_status.return_value = None
+    response.json.side_effect = ValueError("invalid json")
+
+    with patch("app.services.search_service.httpx.AsyncClient.post", new=AsyncMock(return_value=response)):
+        service = TavilySearchService(
+            SearchSettings(
+                provider="tavily",
+                api_key="search-key",
+                base_url="https://api.tavily.com",
+                timeout_seconds=8,
+                max_results=5,
+            )
+        )
+        result = await service.search("Astral AI 最新消息")
+
+    assert result["query"] == "Astral AI 最新消息"
+    assert result["results"] == []
+    assert result["error"] == "search response was invalid"

@@ -572,7 +572,7 @@ def _finalize_sources(
 
     citation_indexes = _extract_citation_indexes(assistant_content, limit=len(indexed_sources))
     if not citation_indexes:
-        return indexed_sources
+        return []
     return [indexed_sources[index - 1] for index in citation_indexes]
 
 
