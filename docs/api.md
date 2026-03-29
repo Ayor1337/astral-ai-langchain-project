@@ -9,6 +9,9 @@
 当前后端提供：
 
 - `GET /`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
 - `POST /api/chat/stream`
 - `POST /api/chat/runs/{run_id}/stop`
 - `POST /api/conversations`
@@ -36,6 +39,9 @@ SEARCH_MAX_RESULTS=5
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/astral_ai
 MEMORY_WINDOW_SIZE=8
 MEMORY_SUMMARY_TRIGGER=12
+JWT_SECRET_KEY=replace-with-a-long-random-secret
+JWT_EXPIRE_SECONDS=604800
+JWT_ALGORITHM=HS256
 ```
 
 说明：
@@ -45,11 +51,15 @@ MEMORY_SUMMARY_TRIGGER=12
 - `TITLE_AGENT_*` 为可选配置；仅用于首轮对话标题生成
 - `SEARCH_*` 为联网搜索配置；只有请求 `search_enabled=true` 时才会用到
 - 当 `search_enabled=true` 但未配置 `SEARCH_API_KEY` 时，请求会返回 `500`
+- `JWT_SECRET_KEY` 用于本地账号 JWT 的签发与校验
+- `JWT_EXPIRE_SECONDS` 默认为 `604800`
+- `JWT_ALGORITHM` 当前固定为 `HS256`
 
 ## 通用约定
 
 - 时间字段统一为 ISO 8601 字符串
 - UUID 字段统一为字符串
+- 除 `/`、`/docs`、`/redoc`、`/openapi.json`、`/api/auth/register`、`/api/auth/login` 外，其余接口都需要 `Authorization: Bearer <access_token>`
 - 普通错误响应格式：
 
 ```json
@@ -84,6 +94,7 @@ GET /
 POST /api/chat/stream
 Accept: text/event-stream
 Content-Type: application/json
+Authorization: Bearer <access_token>
 ```
 
 ### 请求体
@@ -312,6 +323,7 @@ assistant 消息只返回：
 
 ```http
 POST /api/conversations
+Authorization: Bearer <access_token>
 ```
 
 ### 响应
@@ -339,6 +351,7 @@ POST /api/conversations
 
 ```http
 GET /api/conversations
+Authorization: Bearer <access_token>
 ```
 
 ### 响应
@@ -368,6 +381,7 @@ GET /api/conversations
 
 ```http
 GET /api/conversations/{conversation_id}
+Authorization: Bearer <access_token>
 ```
 
 ### 路径参数
@@ -423,6 +437,7 @@ GET /api/conversations/{conversation_id}
 ```http
 PATCH /api/conversations/{conversation_id}
 Content-Type: application/json
+Authorization: Bearer <access_token>
 ```
 
 ### 路径参数
@@ -469,6 +484,7 @@ Content-Type: application/json
 
 ```http
 DELETE /api/conversations/{conversation_id}
+Authorization: Bearer <access_token>
 ```
 
 ### 路径参数
@@ -499,6 +515,7 @@ DELETE /api/conversations/{conversation_id}
 
 ```http
 POST /api/chat/runs/{run_id}/stop
+Authorization: Bearer <access_token>
 ```
 
 ### 路径参数
@@ -520,3 +537,59 @@ POST /api/chat/runs/{run_id}/stop
 
 - `202`：已接受终止请求
 - `404`：聊天运行不存在或已结束
+
+## 认证接口
+
+### 注册
+
+```http
+POST /api/auth/register
+Content-Type: application/json
+```
+
+```json
+{
+  "username": "alice_01",
+  "nickname": "Alice",
+  "password": "password123"
+}
+```
+
+成功返回：
+
+```json
+{
+  "access_token": "jwt-token",
+  "token_type": "bearer",
+  "expires_in": 604800,
+  "user": {
+    "id": "0f31cc7e-0ec7-4d8f-9baf-84f7072a2a98",
+    "username": "alice_01",
+    "nickname": "Alice",
+    "created_at": "2026-03-28T12:00:00Z"
+  }
+}
+```
+
+### 登录
+
+```http
+POST /api/auth/login
+Content-Type: application/json
+```
+
+```json
+{
+  "username": "alice_01",
+  "password": "password123"
+}
+```
+
+成功返回结构与注册相同。
+
+### 当前用户
+
+```http
+GET /api/auth/me
+Authorization: Bearer <access_token>
+```

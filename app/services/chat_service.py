@@ -43,13 +43,15 @@ async def stream_chat_events(request: ChatRequest) -> AsyncIterator[ChatEvent]:
 
     conversation = await get_or_create_conversation(
         request,
+        user_id=request.user_id,
         session_factory=session_factory,
         repository_factory=ConversationRepository,
     )
-    run_handle = register_chat_run(conversation.id)
+    run_handle = register_chat_run(conversation.id, request.user_id)
     context = await prepare_chat_context(
         conversation=conversation,
         message=request.message,
+        user_id=request.user_id,
         settings=settings,
         session_factory=session_factory,
         repository_factory=ConversationRepository,

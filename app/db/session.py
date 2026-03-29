@@ -77,6 +77,9 @@ async def init_db() -> None:
         await connection.execute(
             text("ALTER TABLE conversation_messages DROP COLUMN IF EXISTS content_blocks")
         )
+        await connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_conversations_user_id ON conversations (user_id)")
+        )
 
 
 async def close_db() -> None:

@@ -85,7 +85,13 @@ class FakeRepository:
         )
         return self.conversation
 
-    async def get_conversation(self, conversation_id: UUID, *, include_deleted: bool = False):
+    async def get_conversation(
+        self,
+        conversation_id: UUID,
+        *,
+        user_id: str | None = None,
+        include_deleted: bool = False,
+    ):
         if self.conversation and self.conversation.id == conversation_id:
             return self.conversation
         return None

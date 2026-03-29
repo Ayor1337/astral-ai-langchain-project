@@ -18,6 +18,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     thinking_enabled: bool = False
     search_enabled: bool = False
+    user_id: str = ""
 
 
 class ChatRunStopResponse(BaseModel):

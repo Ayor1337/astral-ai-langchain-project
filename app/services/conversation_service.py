@@ -37,40 +37,62 @@ def _to_message_view(message: ConversationMessage) -> ConversationMessageView:
     )
 
 
-async def create_conversation() -> ConversationListItem:
+async def create_conversation(user_id: str) -> ConversationListItem:
     """创建空会话并返回列表项视图。
 
     用于前端在发出第一条消息前先拿到稳定的会话资源。
+
+    Args:
+        user_id: 当前用户 ID。
+
+    Returns:
+        新创建的会话列表项。
     """
     session_factory = get_session_factory()
     async with session_factory() as session:
         repository = ConversationRepository(session)
-        conversation = await repository.create_conversation(title=DEFAULT_CONVERSATION_TITLE)
+        conversation = await repository.create_conversation(
+            title=DEFAULT_CONVERSATION_TITLE,
+            user_id=user_id,
+        )
         await session.commit()
         return _to_list_item(conversation)
 
 
-async def list_conversations() -> list[ConversationListItem]:
+async def list_conversations(user_id: str) -> list[ConversationListItem]:
     """加载会话列表，不在服务层重复处理排序逻辑。
 
     排序和过滤规则都由仓储层统一负责。
+
+    Args:
+        user_id: 当前用户 ID。
+
+    Returns:
+        当前用户可见的会话列表项。
     """
     session_factory = get_session_factory()
     async with session_factory() as session:
         repository = ConversationRepository(session)
-        conversations = await repository.list_active_conversations()
+        conversations = await repository.list_active_conversations(user_id=user_id)
         return [_to_list_item(conversation) for conversation in conversations]
 
 
-async def get_conversation_detail(conversation_id: UUID) -> ConversationDetail:
+async def get_conversation_detail(conversation_id: UUID, user_id: str) -> ConversationDetail:
     """返回会话元数据与按顺序排列的消息历史。
 
     如果会话不存在，直接抛出统一的领域错误。
+
+    Args:
+        conversation_id: 会话 ID。
+        user_id: 当前用户 ID。
+
+    Returns:
+        当前用户可访问的会话详情。
     """
     session_factory = get_session_factory()
     async with session_factory() as session:
         repository = ConversationRepository(session)
-        conversation = await repository.get_conversation(conversation_id)
+        conversation = await repository.get_conversation(conversation_id, user_id=user_id)
         if conversation is None:
             raise ConversationNotFoundError("conversation not found")
         messages = await repository.list_messages(conversation_id)
@@ -80,15 +102,23 @@ async def get_conversation_detail(conversation_id: UUID) -> ConversationDetail:
         )
 
 
-async def update_conversation_title(conversation_id: UUID, title: str) -> ConversationListItem:
+async def update_conversation_title(conversation_id: UUID, user_id: str, title: str) -> ConversationListItem:
     """更新标题并返回最新列表视图。
 
     提交后立即返回与列表页一致的数据。
+
+    Args:
+        conversation_id: 会话 ID。
+        user_id: 当前用户 ID。
+        title: 新标题。
+
+    Returns:
+        更新后的会话列表项。
     """
     session_factory = get_session_factory()
     async with session_factory() as session:
         repository = ConversationRepository(session)
-        conversation = await repository.get_conversation(conversation_id)
+        conversation = await repository.get_conversation(conversation_id, user_id=user_id)
         if conversation is None:
             raise ConversationNotFoundError("conversation not found")
         conversation = await repository.update_title(conversation, title)
@@ -96,15 +126,19 @@ async def update_conversation_title(conversation_id: UUID, title: str) -> Conver
         return _to_list_item(conversation)
 
 
-async def delete_conversation(conversation_id: UUID) -> None:
+async def delete_conversation(conversation_id: UUID, user_id: str) -> None:
     """执行软删除，让历史数据仍可保留在数据库中。
 
     删除后仅隐藏会话，不清理底层记录。
+
+    Args:
+        conversation_id: 会话 ID。
+        user_id: 当前用户 ID。
     """
     session_factory = get_session_factory()
     async with session_factory() as session:
         repository = ConversationRepository(session)
-        conversation = await repository.get_conversation(conversation_id)
+        conversation = await repository.get_conversation(conversation_id, user_id=user_id)
         if conversation is None:
             raise ConversationNotFoundError("conversation not found")
         await repository.soft_delete(conversation)

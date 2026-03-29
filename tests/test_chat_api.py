@@ -1,5 +1,6 @@
 import time
 from threading import Thread
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,7 +9,9 @@ import app.api.chat as chat_api
 from app.core.config import ConfigurationError
 from app.llm.base import ThinkingNotSupportedError, UpstreamServiceError
 from app.main import app
+from app.services.chat_runs import register_chat_run
 from app.services.exceptions import ConversationNotFoundError
+from tests.auth_utils import build_auth_header
 
 
 @pytest.fixture
@@ -34,6 +37,7 @@ def test_stream_chat_returns_chunk_only_when_thinking_disabled(client, monkeypat
         "POST",
         "/api/chat/stream",
         json={"conversation_id": None, "message": "你好"},
+        headers=build_auth_header(),
     ) as response:
         body = "".join(response.iter_text())
 
@@ -66,6 +70,7 @@ def test_stream_chat_returns_conversation_title_event(client, monkeypatch):
         "POST",
         "/api/chat/stream",
         json={"message": "你好"},
+        headers=build_auth_header(),
     ) as response:
         body = "".join(response.iter_text())
 
@@ -116,6 +121,7 @@ def test_stream_chat_returns_trace_steps_and_chunks_when_thinking_enabled(client
         "POST",
         "/api/chat/stream",
         json={"message": "你好", "thinking_enabled": True},
+        headers=build_auth_header(),
     ) as response:
         body = "".join(response.iter_text())
 
@@ -144,6 +150,7 @@ def test_stream_chat_accepts_thinking_enabled(client, monkeypatch):
         "POST",
         "/api/chat/stream",
         json={"message": "你好", "thinking_enabled": True},
+        headers=build_auth_header(),
     ) as response:
         body = "".join(response.iter_text())
 
@@ -179,6 +186,7 @@ def test_stream_chat_accepts_search_enabled_and_done_sources(client, monkeypatch
         "POST",
         "/api/chat/stream",
         json={"message": "Astral AI 最新消息", "search_enabled": True},
+        headers=build_auth_header(),
     ) as response:
         body = "".join(response.iter_text())
 
@@ -199,6 +207,7 @@ def test_stream_chat_returns_stopped_done_status(client, monkeypatch):
         "POST",
         "/api/chat/stream",
         json={"message": "你好"},
+        headers=build_auth_header(),
     ) as response:
         body = "".join(response.iter_text())
 
@@ -220,7 +229,12 @@ def test_stream_chat_emits_first_event_before_full_stream_finishes(client, monke
     observed: dict[str, object] = {}
 
     def consume_stream() -> None:
-        with client.stream("POST", "/api/chat/stream", json={"message": "你好"}) as response:
+        with client.stream(
+            "POST",
+            "/api/chat/stream",
+            json={"message": "你好"},
+            headers=build_auth_header(),
+        ) as response:
             observed["status_code"] = response.status_code
             start = time.perf_counter()
             lines = response.iter_lines()
@@ -247,13 +261,17 @@ def test_stream_chat_emits_first_event_before_full_stream_finishes(client, monke
 
 
 def test_stop_chat_run_returns_202(client, monkeypatch):
-    async def fake_request_stop_chat_run(run_id):
+    async def fake_request_stop_chat_run(run_id, user_id=""):
         assert str(run_id) == "8bc85d87-ea36-46de-aeeb-d26c17e57ef3"
+        assert user_id == "11111111-1111-1111-1111-111111111111"
         return {"run_id": str(run_id), "status": "stop_requested"}
 
     monkeypatch.setattr(chat_api, "request_stop_chat_run", fake_request_stop_chat_run)
 
-    response = client.post("/api/chat/runs/8bc85d87-ea36-46de-aeeb-d26c17e57ef3/stop")
+    response = client.post(
+        "/api/chat/runs/8bc85d87-ea36-46de-aeeb-d26c17e57ef3/stop",
+        headers=build_auth_header(),
+    )
 
     assert response.status_code == 202
     assert response.json() == {
@@ -263,12 +281,15 @@ def test_stop_chat_run_returns_202(client, monkeypatch):
 
 
 def test_stop_chat_run_returns_404(client, monkeypatch):
-    async def fake_request_stop_chat_run(run_id):
+    async def fake_request_stop_chat_run(run_id, user_id=""):
         raise chat_api.ChatRunNotFoundError("chat run not found")
 
     monkeypatch.setattr(chat_api, "request_stop_chat_run", fake_request_stop_chat_run)
 
-    response = client.post("/api/chat/runs/8bc85d87-ea36-46de-aeeb-d26c17e57ef3/stop")
+    response = client.post(
+        "/api/chat/runs/8bc85d87-ea36-46de-aeeb-d26c17e57ef3/stop",
+        headers=build_auth_header(),
+    )
 
     assert response.status_code == 404
     assert response.json() == {"detail": "chat run not found"}
@@ -282,7 +303,7 @@ def test_stop_chat_run_returns_404(client, monkeypatch):
     ],
 )
 def test_stream_chat_validates_request_body(client, payload, field_name):
-    response = client.post("/api/chat/stream", json=payload)
+    response = client.post("/api/chat/stream", json=payload, headers=build_auth_header())
 
     assert response.status_code == 422
     assert field_name in response.text
@@ -295,7 +316,7 @@ def test_stream_chat_returns_500_when_config_missing(client, monkeypatch):
 
     monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
 
-    response = client.post("/api/chat/stream", json={"message": "你好"})
+    response = client.post("/api/chat/stream", json={"message": "你好"}, headers=build_auth_header())
 
     assert response.status_code == 500
     assert response.json() == {"detail": "DATABASE_URL is not configured"}
@@ -311,6 +332,7 @@ def test_stream_chat_returns_404_when_conversation_missing(client, monkeypatch):
     response = client.post(
         "/api/chat/stream",
         json={"conversation_id": "8bc85d87-ea36-46de-aeeb-d26c17e57ef3", "message": "你好"},
+        headers=build_auth_header(),
     )
 
     assert response.status_code == 404
@@ -324,7 +346,7 @@ def test_stream_chat_returns_502_when_upstream_fails_before_stream(client, monke
 
     monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
 
-    response = client.post("/api/chat/stream", json={"message": "你好"})
+    response = client.post("/api/chat/stream", json={"message": "你好"}, headers=build_auth_header())
 
     assert response.status_code == 502
     assert response.json() == {"detail": "model upstream failed"}
@@ -337,7 +359,11 @@ def test_stream_chat_returns_400_when_thinking_not_supported(client, monkeypatch
 
     monkeypatch.setattr(chat_api, "stream_chat_events", fake_stream_chat_events)
 
-    response = client.post("/api/chat/stream", json={"message": "你好", "thinking_enabled": True})
+    response = client.post(
+        "/api/chat/stream",
+        json={"message": "你好", "thinking_enabled": True},
+        headers=build_auth_header(),
+    )
 
     assert response.status_code == 400
     assert response.json() == {"detail": "provider openai does not support thinking"}
@@ -354,3 +380,66 @@ def test_cors_preflight_returns_allow_origin_header(client):
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "*"
+
+
+def test_stream_chat_returns_401_without_token(client):
+    response = client.post("/api/chat/stream", json={"message": "你好"})
+
+    assert response.status_code == 401
+
+
+def test_stop_chat_run_returns_401_without_token(client):
+    response = client.post("/api/chat/runs/8bc85d87-ea36-46de-aeeb-d26c17e57ef3/stop")
+
+    assert response.status_code == 401
+
+
+def test_stream_chat_returns_404_for_other_users_conversation(client):
+    username_a = f"user_{uuid4().hex[:8]}"
+    username_b = f"user_{uuid4().hex[:8]}"
+
+    register_a = client.post(
+        "/api/auth/register",
+        json={"username": username_a, "nickname": "User A", "password": "password123"},
+    )
+    register_b = client.post(
+        "/api/auth/register",
+        json={"username": username_b, "nickname": "User B", "password": "password123"},
+    )
+    token_a = register_a.json()["access_token"]
+    token_b = register_b.json()["access_token"]
+    create_response = client.post(
+        "/api/conversations",
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+    conversation_id = create_response.json()["id"]
+
+    response = client.post(
+        "/api/chat/stream",
+        json={"conversation_id": conversation_id, "message": "你好"},
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
+
+    assert register_a.status_code == 200
+    assert register_b.status_code == 200
+    assert create_response.status_code == 201
+    assert response.status_code == 404
+    assert response.json() == {"detail": "conversation not found"}
+
+
+def test_stop_chat_run_returns_404_for_other_users_run(client):
+    run_handle = register_chat_run(
+        uuid4(),
+        user_id="11111111-1111-1111-1111-111111111111",
+    )
+
+    response = client.post(
+        f"/api/chat/runs/{run_handle.run_id}/stop",
+        headers=build_auth_header(
+            user_id="22222222-2222-2222-2222-222222222222",
+            username="other",
+        ),
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "chat run not found"}

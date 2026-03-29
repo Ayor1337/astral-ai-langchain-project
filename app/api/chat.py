@@ -4,10 +4,11 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.core.config import ConfigurationError
+from app.core.security import AuthenticatedUser, get_current_user
 from app.llm.base import ThinkingNotSupportedError, UpstreamServiceError
 from app.schemas.chat import ChatRequest, ChatRunStopResponse
 from app.services.chat_runs import request_stop_chat_run
@@ -66,16 +67,21 @@ async def _resolve_stream(request: ChatRequest) -> AsyncIterator[tuple[str, dict
         502: {"description": "上游模型服务错误"},
     },
 )
-async def stream_chat(request: ChatRequest) -> StreamingResponse:
+async def stream_chat(
+    request: ChatRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> StreamingResponse:
     """创建聊天流响应，并把上游错误转换为稳定的 HTTP 状态码。
 
     Args:
         request: 聊天请求体。
+        current_user: 当前登录用户。
 
     Returns:
         以 SSE 形式返回的流式响应。
     """
     try:
+        request.user_id = str(current_user.id)
         # 先拉取首个事件，确保在真正建立 SSE 响应前就能把配置/会话类错误转成 HTTP 状态码。
         stream = await _resolve_stream(request)
         first_event = await anext(stream)
@@ -115,17 +121,21 @@ async def stream_chat(request: ChatRequest) -> StreamingResponse:
         404: {"description": "聊天运行不存在或已结束"},
     },
 )
-async def stop_chat_run(run_id: UUID) -> ChatRunStopResponse:
+async def stop_chat_run(
+    run_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> ChatRunStopResponse:
     """按运行句柄请求停止一个聊天流。
 
     Args:
         run_id: 聊天运行 ID。
+        current_user: 当前登录用户。
 
     Returns:
         终止请求的标准响应。
     """
     try:
-        payload = await request_stop_chat_run(run_id)
+        payload = await request_stop_chat_run(run_id, str(current_user.id))
     except ChatRunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ChatRunStopResponse.model_validate(payload)

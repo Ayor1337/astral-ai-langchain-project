@@ -50,25 +50,45 @@ class ConversationRepository:
         self,
         conversation_id: UUID,
         *,
+        user_id: str | None = None,
         include_deleted: bool = False,
     ) -> Conversation | None:
         """按需过滤软删除会话，避免业务层重复拼接条件。
 
         调用方只需决定是否需要包含已删除数据。
+
+        Args:
+            conversation_id: 会话 ID。
+            user_id: 当前用户 ID；为空时不追加归属过滤。
+            include_deleted: 是否包含已软删除会话。
+
+        Returns:
+            匹配的会话实体，不存在时返回 `None`。
         """
         query = select(Conversation).where(Conversation.id == conversation_id)
+        if user_id:
+            query = query.where(Conversation.user_id == user_id)
         if not include_deleted:
             query = query.where(Conversation.deleted_at.is_(None))
         return await self.session.scalar(query)
 
-    async def list_active_conversations(self) -> list[Conversation]:
+    async def list_active_conversations(self, *, user_id: str) -> list[Conversation]:
         """按最近更新时间倒序返回仍可见的会话。
 
         该方法只负责可见性与排序，不做额外加工。
+
+        Args:
+            user_id: 当前用户 ID。
+
+        Returns:
+            当前用户的可见会话列表。
         """
         result = await self.session.scalars(
             select(Conversation)
-            .where(Conversation.deleted_at.is_(None))
+            .where(
+                Conversation.deleted_at.is_(None),
+                Conversation.user_id == user_id,
+            )
             .order_by(desc(Conversation.updated_at))
         )
         return list(result.all())

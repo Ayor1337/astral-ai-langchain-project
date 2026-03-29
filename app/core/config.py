@@ -29,6 +29,13 @@ class SearchSettings:
 
 
 @dataclass(frozen=True)
+class AuthSettings:
+    jwt_secret_key: str
+    jwt_expire_seconds: int = 604800
+    jwt_algorithm: str = "HS256"
+
+
+@dataclass(frozen=True)
 class Settings:
     chat_endpoint: ModelEndpointSettings
     title_agent_endpoint: ModelEndpointSettings | None
@@ -36,6 +43,7 @@ class Settings:
     memory_window_size: int
     memory_summary_trigger: int
     search: SearchSettings = field(default_factory=SearchSettings)
+    auth: AuthSettings | None = None
 
 
 def _load_dotenv_values() -> dict[str, str]:
@@ -164,6 +172,24 @@ def _build_search_settings() -> SearchSettings:
     )
 
 
+def _build_optional_auth_settings() -> AuthSettings | None:
+    """构建可选认证配置。
+
+    Returns:
+        存在任意认证配置时返回认证设置，否则返回 `None`。
+    """
+    raw_secret = _get_setting_value("JWT_SECRET_KEY")
+    raw_expire = _get_setting_value("JWT_EXPIRE_SECONDS")
+    raw_algorithm = _get_setting_value("JWT_ALGORITHM")
+    if not any((raw_secret, raw_expire, raw_algorithm)):
+        return None
+    return AuthSettings(
+        jwt_secret_key=raw_secret,
+        jwt_expire_seconds=_get_int_setting("JWT_EXPIRE_SECONDS", 604800),
+        jwt_algorithm=raw_algorithm or "HS256",
+    )
+
+
 def _validate_endpoint_settings(prefix: str, endpoint: ModelEndpointSettings) -> ModelEndpointSettings:
     """校验并归一化模型端点配置。
 
@@ -240,6 +266,39 @@ def _validate_search_settings(search: SearchSettings) -> SearchSettings:
     )
 
 
+def _validate_auth_settings(auth: AuthSettings | None) -> AuthSettings | None:
+    """校验并归一化认证配置。
+
+    Args:
+        auth: 待校验的认证配置。
+
+    Returns:
+        归一化后的认证配置，未启用时返回 `None`。
+
+    Raises:
+        ConfigurationError: 认证配置不合法时抛出。
+    """
+    if auth is None:
+        return None
+
+    secret = auth.jwt_secret_key.strip()
+    if not secret:
+        raise ConfigurationError("JWT_SECRET_KEY is not configured")
+
+    algorithm = auth.jwt_algorithm.strip().upper()
+    if algorithm != "HS256":
+        raise ConfigurationError("JWT_ALGORITHM must be HS256")
+
+    if auth.jwt_expire_seconds <= 0:
+        raise ConfigurationError("JWT_EXPIRE_SECONDS must be greater than 0")
+
+    return AuthSettings(
+        jwt_secret_key=secret,
+        jwt_expire_seconds=auth.jwt_expire_seconds,
+        jwt_algorithm=algorithm,
+    )
+
+
 def validate_settings(settings: Settings) -> Settings:
     """校验完整配置并返回规范化结果。
 
@@ -281,6 +340,7 @@ def validate_settings(settings: Settings) -> Settings:
         memory_window_size=settings.memory_window_size,
         memory_summary_trigger=settings.memory_summary_trigger,
         search=_validate_search_settings(settings.search),
+        auth=_validate_auth_settings(settings.auth),
     )
 
 
@@ -299,5 +359,6 @@ def get_settings() -> Settings:
         memory_window_size=_get_int_setting("MEMORY_WINDOW_SIZE", 8),
         memory_summary_trigger=_get_int_setting("MEMORY_SUMMARY_TRIGGER", 12),
         search=_build_search_settings(),
+        auth=_build_optional_auth_settings(),
     )
     return validate_settings(settings)

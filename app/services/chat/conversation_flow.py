@@ -20,19 +20,35 @@ class PreparedChatContext:
 async def get_or_create_conversation(
     request: ChatRequest,
     *,
+    user_id: str,
     session_factory: Any,
     repository_factory: Callable[[Any], Any],
 ) -> Any:
     """加载已有会话，或在旧调用路径下隐式创建会话。
 
     兼容没有 `conversation_id` 的旧入口。
+
+    Args:
+        request: 聊天请求体。
+        user_id: 当前用户 ID。
+        session_factory: 数据库会话工厂。
+        repository_factory: 仓储工厂。
+
+    Returns:
+        当前用户可访问的会话实体。
     """
     async with session_factory() as session:
         repository = repository_factory(session)
         if request.conversation_id is None:
-            conversation = await repository.create_conversation(title=DEFAULT_CONVERSATION_TITLE)
+            conversation = await repository.create_conversation(
+                title=DEFAULT_CONVERSATION_TITLE,
+                user_id=user_id,
+            )
         else:
-            conversation = await repository.get_conversation(request.conversation_id)
+            conversation = await repository.get_conversation(
+                request.conversation_id,
+                user_id=user_id,
+            )
             if conversation is None:
                 raise ConversationNotFoundError("conversation not found")
         await session.commit()
@@ -43,6 +59,7 @@ async def prepare_chat_context(
     *,
     conversation: Any,
     message: str,
+    user_id: str,
     settings: Any,
     session_factory: Any,
     repository_factory: Callable[[Any], Any],
@@ -50,10 +67,21 @@ async def prepare_chat_context(
     """持久化当前用户消息，并构建发送给模型的上下文消息。
 
     同时决定当前轮是否需要异步生成标题。
+
+    Args:
+        conversation: 当前会话。
+        message: 当前用户消息。
+        user_id: 当前用户 ID。
+        settings: 全局配置。
+        session_factory: 数据库会话工厂。
+        repository_factory: 仓储工厂。
+
+    Returns:
+        构建完成的聊天上下文。
     """
     async with session_factory() as session:
         repository = repository_factory(session)
-        current_conversation = await repository.get_conversation(conversation.id)
+        current_conversation = await repository.get_conversation(conversation.id, user_id=user_id)
         if current_conversation is None:
             raise ConversationNotFoundError("conversation not found")
 

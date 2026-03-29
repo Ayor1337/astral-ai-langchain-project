@@ -1,8 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.core.config import ConfigurationError
+from app.core.security import AuthenticatedUser, get_current_user
 from app.schemas.conversation import ConversationDetail, ConversationListItem, ConversationUpdateRequest
 from app.services.conversation_service import (
     create_conversation,
@@ -27,14 +28,19 @@ router = APIRouter(prefix="/api/conversations", tags=["conversations"])
         500: {"description": "服务配置错误"},
     },
 )
-async def create_conversation_route() -> ConversationListItem:
+async def create_conversation_route(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> ConversationListItem:
     """创建空会话并返回列表项。
+
+    Args:
+        current_user: 当前登录用户。
 
     Returns:
         新创建的会话列表项。
     """
     try:
-        return await create_conversation()
+        return await create_conversation(str(current_user.id))
     except ConfigurationError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -45,14 +51,19 @@ async def create_conversation_route() -> ConversationListItem:
     summary="获取会话列表",
     description="返回所有未软删除的会话，按 updated_at 倒序排列。",
 )
-async def list_conversations_route() -> list[ConversationListItem]:
+async def list_conversations_route(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> list[ConversationListItem]:
     """返回所有未软删除的会话列表。
+
+    Args:
+        current_user: 当前登录用户。
 
     Returns:
         按更新时间排序的会话列表项。
     """
     try:
-        return await list_conversations()
+        return await list_conversations(str(current_user.id))
     except ConfigurationError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -63,17 +74,21 @@ async def list_conversations_route() -> list[ConversationListItem]:
     summary="获取会话详情",
     description="返回单个会话的元数据、摘要和完整消息历史。新建空会话时 messages 为空数组。",
 )
-async def get_conversation_detail_route(conversation_id: UUID) -> ConversationDetail:
+async def get_conversation_detail_route(
+    conversation_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> ConversationDetail:
     """加载单个会话及其完整消息历史。
 
     Args:
         conversation_id: 会话 ID。
+        current_user: 当前登录用户。
 
     Returns:
         会话详情与消息列表。
     """
     try:
-        return await get_conversation_detail(conversation_id)
+        return await get_conversation_detail(conversation_id, str(current_user.id))
     except ConfigurationError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except ConversationNotFoundError as exc:
@@ -89,18 +104,20 @@ async def get_conversation_detail_route(conversation_id: UUID) -> ConversationDe
 async def update_conversation_route(
     conversation_id: UUID,
     request: ConversationUpdateRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> ConversationListItem:
     """更新会话标题。
 
     Args:
         conversation_id: 会话 ID。
         request: 标题更新请求。
+        current_user: 当前登录用户。
 
     Returns:
         更新后的会话列表项。
     """
     try:
-        return await update_conversation_title(conversation_id, request.title)
+        return await update_conversation_title(conversation_id, str(current_user.id), request.title)
     except ConfigurationError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except ConversationNotFoundError as exc:
@@ -113,17 +130,21 @@ async def update_conversation_route(
     summary="软删除会话",
     description="将会话标记为已删除。删除后的会话不会出现在列表中，详情与聊天访问将返回 404。",
 )
-async def delete_conversation_route(conversation_id: UUID) -> Response:
+async def delete_conversation_route(
+    conversation_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> Response:
     """软删除会话。
 
     Args:
         conversation_id: 会话 ID。
+        current_user: 当前登录用户。
 
     Returns:
         204 空响应。
     """
     try:
-        await delete_conversation(conversation_id)
+        await delete_conversation(conversation_id, str(current_user.id))
     except ConfigurationError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except ConversationNotFoundError as exc:
