@@ -2,8 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.config import ConfigurationError
 from app.core.security import AuthenticatedUser, get_current_user
-from app.schemas.auth import AuthUserView, LoginRequest, RegisterRequest, TokenResponse
-from app.services.auth_service import get_user_profile, login_user, register_user
+from app.schemas.auth import (
+    AuthUserView,
+    ChangeUsernameRequest,
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+)
+from app.services.auth_service import change_username, get_user_profile, login_user, register_user
 from app.services.exceptions import AuthenticationError, UserAlreadyExistsError, UserNotFoundError
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -93,3 +99,39 @@ async def me_route(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except UserNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/change-username",
+    response_model=TokenResponse,
+    summary="修改用户名",
+    description="修改当前登录用户的用户名，并返回包含新用户名的新 JWT access token。",
+    responses={
+        200: {"description": "修改成功"},
+        401: {"description": "认证失败"},
+        404: {"description": "用户不存在"},
+        409: {"description": "用户名已存在"},
+        500: {"description": "认证配置错误"},
+    },
+)
+async def change_username_route(
+    request: ChangeUsernameRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> TokenResponse:
+    """修改当前登录用户的用户名。
+
+    Args:
+        request: 修改用户名请求体。
+        current_user: 当前登录用户。
+
+    Returns:
+        带新 token 的登录态响应。
+    """
+    try:
+        return await change_username(str(current_user.id), request)
+    except ConfigurationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except UserAlreadyExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -161,6 +161,7 @@ Authorization: Bearer <access_token>
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/auth/me`
+- `POST /api/auth/change-username`
 
 会话详情中的 assistant 消息只保留：
 

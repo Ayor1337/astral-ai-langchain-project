@@ -4,7 +4,13 @@ from app.core.security import create_access_token, get_auth_settings, hash_passw
 from app.db.models import User
 from app.db.session import get_session_factory
 from app.repositories.users import UserRepository
-from app.schemas.auth import AuthUserView, LoginRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import (
+    AuthUserView,
+    ChangeUsernameRequest,
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+)
 from app.services.exceptions import AuthenticationError, UserAlreadyExistsError, UserNotFoundError
 
 
@@ -101,3 +107,40 @@ async def get_user_profile(user_id: str) -> AuthUserView:
         if user is None:
             raise UserNotFoundError("user not found")
         return _to_user_view(user)
+
+
+async def change_username(user_id: str, request: ChangeUsernameRequest) -> TokenResponse:
+    """修改当前用户的用户名并签发新 token。
+
+    Args:
+        user_id: 当前用户 ID。
+        request: 修改用户名请求。
+
+    Returns:
+        带新 token 的登录态响应。
+
+    Raises:
+        UserNotFoundError: 当前用户不存在时抛出。
+        UserAlreadyExistsError: 目标用户名已被其他用户占用时抛出。
+    """
+    auth = get_auth_settings()
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        repository = UserRepository(session)
+        user = await repository.get_by_id(user_id)
+        if user is None:
+            raise UserNotFoundError("user not found")
+
+        if request.username != user.username:
+            existing_user = await repository.get_by_username(request.username)
+            if existing_user is not None and existing_user.id != user.id:
+                raise UserAlreadyExistsError("username already exists")
+            user = await repository.update_username(user, request.username)
+
+        await session.commit()
+
+    return TokenResponse(
+        access_token=create_access_token(user_id=user.id, username=user.username, auth=auth),
+        expires_in=auth.jwt_expire_seconds,
+        user=_to_user_view(user),
+    )

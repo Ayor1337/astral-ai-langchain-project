@@ -8,6 +8,24 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 USERNAME_PATTERN = re.compile(r"^[a-z0-9_]{3,32}$")
 
 
+def _normalize_and_validate_username(value: str) -> str:
+    """归一化并校验用户名。
+
+    Args:
+        value: 原始用户名。
+
+    Returns:
+        归一化用户名。
+
+    Raises:
+        ValueError: 用户名格式非法时抛出。
+    """
+    normalized = value.strip().lower()
+    if not USERNAME_PATTERN.fullmatch(normalized):
+        raise ValueError("username must contain only lowercase letters, digits, or underscores")
+    return normalized
+
+
 class RegisterRequest(BaseModel):
     """注册请求体。"""
 
@@ -31,10 +49,7 @@ class RegisterRequest(BaseModel):
         Raises:
             ValueError: 用户名格式非法时抛出。
         """
-        normalized = value.strip().lower()
-        if not USERNAME_PATTERN.fullmatch(normalized):
-            raise ValueError("username must contain only lowercase letters, digits, or underscores")
-        return normalized
+        return _normalize_and_validate_username(value)
 
     @field_validator("nickname")
     @classmethod
@@ -85,6 +100,27 @@ class AuthUserView(BaseModel):
     username: str
     nickname: str
     created_at: datetime
+
+
+class ChangeUsernameRequest(BaseModel):
+    """修改用户名请求体。"""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    username: str = Field(min_length=3, max_length=32)
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        """校验并归一化用户名。
+
+        Args:
+            value: 原始用户名。
+
+        Returns:
+            归一化后的用户名。
+        """
+        return _normalize_and_validate_username(value)
 
 
 class TokenResponse(BaseModel):
