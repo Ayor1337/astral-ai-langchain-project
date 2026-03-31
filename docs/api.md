@@ -12,7 +12,7 @@
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/auth/me`
-- `POST /api/auth/change-username`
+- `POST /api/auth/profile`
 - `POST /api/chat/stream`
 - `POST /api/chat/runs/{run_id}/stop`
 - `POST /api/conversations`
@@ -595,39 +595,33 @@ GET /api/auth/me
 Authorization: Bearer <access_token>
 ```
 
-### 修改用户名
+### 更新用户资料
 
 ```http
-POST /api/auth/change-username
+POST /api/auth/profile
 Authorization: Bearer <access_token>
 Content-Type: application/json
 ```
 
 ```json
 {
-  "username": "alice_new"
+  "nickname": "Alice Cooper"
 }
 ```
 
-成功返回结构与注册、登录相同：
+成功返回最新用户资料：
 
 ```json
 {
-  "access_token": "jwt-token",
-  "token_type": "bearer",
-  "expires_in": 604800,
-  "user": {
-    "id": "0f31cc7e-0ec7-4d8f-9baf-84f7072a2a98",
-    "username": "alice_new",
-    "nickname": "Alice",
-    "created_at": "2026-03-28T12:00:00Z"
-  }
+  "id": "0f31cc7e-0ec7-4d8f-9baf-84f7072a2a98",
+  "username": "alice_01",
+  "nickname": "Alice Cooper",
+  "created_at": "2026-03-28T12:00:00Z"
 }
 ```
 
 说明：
 
-- 修改用户名成功后，前端应覆盖本地 `access_token`
-- 旧 JWT 在过期前仍然可用，这是当前版本的既定兼容行为
-- 如果提交的新用户名在归一化后与当前用户名相同，接口仍返回 `200`
-- 如果新用户名已被其他用户占用，接口返回 `409`
+- 当前版本只接受 `nickname` 字段，传入其他字段会返回 `422`
+- 修改昵称不会重签 JWT，现有 token 可继续使用
+- 如果提交的新昵称去首尾空格后与当前昵称相同，接口仍返回 `200`

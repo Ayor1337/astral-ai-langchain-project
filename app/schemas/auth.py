@@ -102,25 +102,31 @@ class AuthUserView(BaseModel):
     created_at: datetime
 
 
-class ChangeUsernameRequest(BaseModel):
-    """修改用户名请求体。"""
+class UpdateProfileRequest(BaseModel):
+    """更新用户资料请求体。"""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    username: str = Field(min_length=3, max_length=32)
+    nickname: str = Field(min_length=1, max_length=32)
 
-    @field_validator("username")
+    @field_validator("nickname")
     @classmethod
-    def validate_username(cls, value: str) -> str:
-        """校验并归一化用户名。
+    def validate_nickname(cls, value: str) -> str:
+        """校验并归一化昵称。
 
         Args:
-            value: 原始用户名。
+            value: 原始昵称。
 
         Returns:
-            归一化后的用户名。
+            归一化后的昵称。
+
+        Raises:
+            ValueError: 昵称为空时抛出。
         """
-        return _normalize_and_validate_username(value)
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("nickname must not be empty")
+        return normalized
 
 
 class TokenResponse(BaseModel):

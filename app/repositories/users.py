@@ -92,18 +92,3 @@ class UserRepository:
         user.updated_at = utcnow()
         await self.session.flush()
         return user
-
-    async def update_username(self, user: User, username: str) -> User:
-        """更新用户名并刷新更新时间。
-
-        Args:
-            user: 待更新用户。
-            username: 新用户名。
-
-        Returns:
-            更新后的用户实体。
-        """
-        user.username = username
-        user.updated_at = utcnow()
-        await self.session.flush()
-        return user

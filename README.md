@@ -161,7 +161,7 @@ Authorization: Bearer <access_token>
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/auth/me`
-- `POST /api/auth/change-username`
+- `POST /api/auth/profile`
 
 会话详情中的 assistant 消息只保留：
 
@@ -173,13 +173,13 @@ Authorization: Bearer <access_token>
 运行全部测试：
 
 ```bash
-pytest
+.\scripts\run_tests.ps1
 ```
 
 只跑聊天相关测试：
 
 ```bash
-pytest tests/test_chat_api.py tests/test_chat_service.py
+.\scripts\run_tests.ps1 tests/test_chat_api.py tests/test_chat_service.py
 ```
 
 ## 手动调试
